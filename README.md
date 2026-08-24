@@ -18,7 +18,7 @@ This QA/QC toolbox has incorporated ideas from many other previous efforts, incl
 The functions in the toolbox are designed for data following the GEO-TREES tree inventory data format, but most functions should be generalisable beyond this format. 
 See the [GEO-TREES Tree Inventory Guidelines, _Section 16: Data format_](https://docs.google.com/document/d/1Q5Wy_LbNEa0tNaGVntL0Bku41Z3t-TeU85_IxZuC6Uc/edit?usp=sharing). 
 
-For help organising your data according to this format you may wish to use the [ATFS-DataHarmonization](https://github.com/Alliance-for-Tropical-Forest-Science/DataHarmonization) Shiny app. In this repository we provide an output profile for the Shiny app to ensure all data are output in the GEO-TREES format.
+For help organising your data according to this format you may wish to use the [ATFS-DataHarmonization Shiny app](https://github.com/Alliance-for-Tropical-Forest-Science/DataHarmonization). In this repository we provide an output profile for the Shiny app to ensure all data are output in the GEO-TREES format.
 
 The toolbox contains many small functions designed to check a single aspect of data quality in a tree inventory dataset. These functions are bundled into higher-level convenience functions that allow you to run many related checks in a single function call. 
 
