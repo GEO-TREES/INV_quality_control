@@ -21,7 +21,7 @@ format:
         href: https://geo-trees.org
     code-links:
       - text: GitHub
-        href: https://github.com/GEO-TREES/PDA_QAQC
+        href: https://github.com/GEO-TREES/INV_quality_control
 jupyter: ir
 engine: knitr
 ---
@@ -35,15 +35,17 @@ quality control (QA/QC) of GEO-TREES tree inventory data.
 
 This notebook is provided as both a `.qmd` Quarto file, which we recommend
 running in RStudio, and as a `.ipynb` Jupyter Notebook, which you can run in
-JupyterLab either locally or on the ESA/NASA MAAP platform. You can use either
+JupyterLab either locally or on the ESA/NASA MAAP platforms. You can use either
 version to QA/QC your data.
 
 The process for QA/QC:
 
-1. Create a copy of your raw data that conforms to the GEO-TREES L0 data
-   format. See the GEO-TREES Tree Inventory Guidelines Document, Section 17:
-   Data format. You can use the [ATFS Data Harmonization Shiny app]() to help
-   with this. __The original raw data should not be altered__.
+1. Create a copy of your raw stem measurement data that conforms to the
+   GEO-TREES L0 data format. See the [GEO-TREES Tree Inventory Guidelines, _Section 16: Data format_](https://docs.google.com/document/d/1Q5Wy_LbNEa0tNaGVntL0Bku41Z3t-TeU85_IxZuC6Uc/edit?usp=sharing). 
+   You can use the [ATFS Data Harmonization Shiny app](https://docs.google.com/document/d/1Q5Wy_LbNEa0tNaGVntL0Bku41Z3t-TeU85_IxZuC6Uc/edit?usp=sharing)
+   to help with this if you wish. The `inst/` folder in [this repository](https://github.com/GEO-TREES/INV_quality_control) 
+   contains a `.rds` output profile for the GEO-TREES data format. __The
+   original raw data should not be altered__.
 2. Open the notebook and load your __copy__ of the L0 tree inventory data.
 3. Run the code chunks interactively in the notebook. Look at the outputs, and
    make changes to the input data where necessary. Changes can be made either
@@ -58,7 +60,7 @@ The process for QA/QC:
       output_format = "html")` in the R console. You may need to run
       `install.packages("quarto")` first.
     * `.ipynb` in JupyterLab: Click `File > Save and Export Notebook As > HTML`
-5. Send the following to GEO-TREES:
+5. The following data should be sent to GEO-TREES for data archiving:
     * Original version of the raw data
     * Formatted raw data in the GEO-TREES L0 data format.
     * Raw data with changes made following QA/QC
@@ -67,7 +69,7 @@ The process for QA/QC:
 
 # Setup
 
-Install and load the GEO-TREES tree inventory QA/QC R package. This package
+Install and load the GEO-TREES tree inventory QA/QC R package contained in this repository. This package
 contains various convenience functions for flagging and optionally correcting
 tree inventory data. The package will also load various other packages as
 dependencies. If you want to load additional packages to help you explore and
@@ -76,12 +78,12 @@ manipulate your tree inventory data, you can add to the code chunk below.
 
 ```{r}
 #| eval: false
-devtools::install_github("GEO-TREES/treeInvQC")
+devtools::install_github("GEO-TREES/INV_quality_control")
 ```
 
 
 ```{r}
-library(treeInvQC)
+library(INV_quality_control)
 library(BIOMASS)  # Match taxonomic names to WFO `correctTaxo()`, fit diameter-height models `modelHD()`
 library(ggplot2)  # Augment `plotScatter()` and `plotHistogram()` 
 library(tibble)  # `tribble()` - create dataframes (tibbles) by row
@@ -98,16 +100,34 @@ if (getOption("knitr.in.progress")) {
 
 Throughout the notebook we display the help files for the different functions
 in the notebook using the `displayHelp()` function. Below is the help file for
-the `treeInvQAQC` package:
+the `INV_quality_control` R package:
 
 ```{r}
 #| echo: false
-displayHelp(treeInvQC)
+displayHelp(INV_quality_control)
 ```
 
 # Create L0 tree inventory data   
 
-TODO: This can essentially be a generalised tutorial of my `01_fmt.R` scripts.
+Create a __copy__ of your raw stem measurement data that conforms to the GEO-TREES 
+L0 data format. See the [GEO-TREES Tree Inventory Guidelines, _Section 16: Data format_](https://docs.google.com/document/d/1Q5Wy_LbNEa0tNaGVntL0Bku41Z3t-TeU85_IxZuC6Uc/edit?usp=sharing). 
+__The original raw data should not be altered, always work with a copy of the data__.
+
+You can use the [ATFS Data Harmonization Shiny app](https://docs.google.com/document/d/1Q5Wy_LbNEa0tNaGVntL0Bku41Z3t-TeU85_IxZuC6Uc/edit?usp=sharing) 
+to help re-format your stem measurement data if you wish. The `inst/` folder in
+[this repository](https://github.com/GEO-TREES/INV_quality_control) 
+contains a `.rds` output profile for the GEO-TREES data format, which you can
+load into the app. The app will walk you through creating an input profile for
+your data, then performs the re-formatting procedure.
+
+Alternatively, you can manually re-format your data, for example using a
+spreadsheet editor, or in R.
+
+The QA/QC code below requires you to supply the stem measurement table, the
+plot meta-data table, the plot GNSS table. 
+
+You can also optionally provide the taxonomy table, stem height measurement
+table, and wood density measurement table.
 
 # Load data
 
@@ -178,6 +198,9 @@ Missing records should be added to the stem measurement table. Missing
 measurement values may be estimated by e.g. `correctDiameterSeries()` and
 `correctTaxonSeries()`.
 
+The `datatable()` function above produces pretty HTML tables in a Quarto
+document.
+
 ## Duplicated records
 
 ```{r}
@@ -195,6 +218,10 @@ df_flagRecordDup <- flagRecordDup(
 
 datatable(df_flagRecordDup)
 ```
+
+Duplicated records should be merged or removed. There should only be one
+measurement for each concatenation of
+`site_id`+`plot_id`+`tree_id`+`stem_id`+`measurement_id`.
 
 ## Missing values
 
@@ -225,6 +252,8 @@ df_flagValMissing <- flagValMissing(
 datatable(df_flagValMissing)
 ```
 
+Some columns must never contain `<NA>` values, particularly ID values. 
+
 ```{r}
 df_flagValMissing_diam_cm <- flagValMissing(
   x = s,
@@ -236,6 +265,10 @@ df_flagValMissing_diam_cm <- flagValMissing(
 
 datatable(df_flagValMissing_diam_cm)
 ```
+
+Some columns are only allowed to contain missing values under certain
+conditions. For example, living and standing stems should always have a
+diameter measurement.
 
 ```{r}
 df_flagValMissing_pom_m <- flagValMissing(
@@ -249,46 +282,7 @@ df_flagValMissing_pom_m <- flagValMissing(
 datatable(df_flagValMissing_pom_m)
 ```
 
-## Overgrown recruits
-
-```{r}
-#| echo: false
-displayHelp(flagRecruitBig)
-```
-
-```{r}
-df_flagRecruitBig <- flagRecruitBig(
-  x = s,
-  ind_id = c("site_id", "plot_id", "tree_id", "stem_id"),
-  diam = "diam_cm",
-  census_date = "census_date",
-  census_date_vec = NULL, 
-  min_diam_threshold = 10,  # Minimum diameter threshold of the plot(s)
-  growth_max = 5,  # Maximum feasible annual diameter growth rate 
-  comment = "Overgrown recruit"
-)
-
-datatable(df_flagRecruitBig)
-```
-
-## Pre-recorded recruits
-
-```{r}
-#| echo: false
-displayHelp(flagRecruitPre)
-```
-
-```{r}
-df_flagRecruitPre <- flagRecruitPre(
-  x = s,
-  ind_id = c("site_id", "plot_id", "tree_id", "stem_id"),
-  census_id = "census_id",
-  target = c("diam_cm"),
-  comment = "Pre-census recruit"
-)
-
-datatable(df_flagRecruitPre)
-```
+If a stem has a diameter measurement then it should have a Point of Measurement (POM) value.
 
 # Outlier diameter and height measurements
 
@@ -362,6 +356,8 @@ plotScatter(
   alpha = 0.5)
 ```
 
+These outliers are not necessarily errors, but do deserve closer inspection.
+
 ```{r}
 #| echo: false
 displayHelp(flagValRange)
@@ -432,7 +428,15 @@ df_flagValRound_diam_cm <- flagValRound(
 datatable(df_flagValRound_diam_cm)
 ```
 
+`flagValRound()` finds groups with improbably high proportions of rounded
+measurement values, which might imply poor measurement precision.
+
 # Stem condition codes
+
+```{r}
+#| echo: false
+displayHelp(flagCodeVal)
+```
 
 ```{r}
 df_flagCodeVal <- flagCodeVal(
@@ -458,7 +462,19 @@ df_flagCodeVal <- flagCodeVal(
 datatable(df_flagCodeVal)
 ```
 
+`flagCodeVal()` identifies measurements either with invalid values in the `code` column, or invalid combinations or codes. For example, a stem cannot be dead ("D") and alive ("A") at the same time, or standing ("S") and fallen ("F").
+
 # Stem coordinate issues
+
+## Stem coordinate outliers
+
+```{r}
+#| echo: false
+displayHelp(plotScatter)
+```
+
+Inspect the spatial distribution of stems within each plot. Are any stems
+outside the plot, or distributed unevenly within the plot?
 
 ```{r}
 # Plot stem coordinates
@@ -466,6 +482,35 @@ plotScatter(s$x_rel_m, s$y_rel_m) +
   coord_equal() # +
   # facet_wrap(~s$plot_id)
 ```
+
+```{r}
+df_flagValOutlier_x <- flagValRange(
+  x = s,
+  meas_id = c("site_id", "plot_id", "tree_id", "stem_id", "measurement_id"),
+  target = "x_rel_m",
+  threshold = c(0, 100),
+  comment = "X coordinate outside range"
+)
+
+df_flagValOutlier_y <- flagValRange(
+  x = s,
+  meas_id = c("site_id", "plot_id", "tree_id", "stem_id", "measurement_id"),
+  target = "y_rel_m",
+  threshold = c(0, 100),
+  comment = "Y coordinates outside range"
+)
+
+names(df_flagValOutlier_x)[6] <- "xy_rel_m"
+names(df_flagValOutlier_y)[6] <- "xy_rel_m"
+
+datatable(rbind(df_flagValOutlier_x, df_flagValOutlier_y))
+```
+
+## Stem coordinates relative to subplots
+
+`correctLocSub()` checks whether XY coordinates match with subplot coordinates
+and optionally re-locates incongruously located stems to the center of their
+subplot.
 
 ```{r}
 # Example dataframe with information on subplot relative coordinates
@@ -483,7 +528,14 @@ subs <- tribble(
   9,           0,      100,    80,     90,
   10,          0,      100,    90,     100
 )
+```
 
+```{r}
+#| echo: false
+displayHelp(correctLocSub)
+```
+
+```{r}
 # If the subplot layout varies by plot you can create unique subplot IDs for
 # each plot in the `subs` dataframe with multiple ID columns.
 
@@ -508,6 +560,13 @@ df_correctLocSub <- correctLocSub(
 datatable(df_correctLocSub)
 ```
 
+## Coordinates of multi-stemmed trees
+
+```{r}
+#| echo: false
+displayHelp(flagMultiLoc)
+```
+
 ```{r}
 df_flagMultiLoc <- flagMultiLoc(
   x = s,
@@ -523,6 +582,8 @@ datatable(df_flagMultiLoc)
 ```
 
 # Taxonomic name issues 
+
+## Basic orthographic and nomenclature issues
 
 ```{r}
 #| echo: false
@@ -544,6 +605,8 @@ df_flagTaxonName <- flagTaxonName(
 datatable(df_flagTaxonName)
 ```
 
+## Taxonomic names of multi-stemmed trees
+
 ```{r}
 #| echo: false
 displayHelp(flagMultiTaxon)
@@ -560,6 +623,8 @@ df_flagMultiTaxon <- flagMultiTaxon(
 
 datatable(df_flagMultiTaxon)
 ```
+
+## Check taxonomic names against the World Flora Online database
 
 ```{r}
 #| echo: false
@@ -689,6 +754,48 @@ df_flagTaxonSeries <- flagTaxonSeries(
 
 datatable(df_flagTaxonSeries)
 ```
+
+## Overgrown recruits
+
+```{r}
+#| echo: false
+displayHelp(flagRecruitBig)
+```
+
+```{r}
+df_flagRecruitBig <- flagRecruitBig(
+  x = s,
+  ind_id = c("site_id", "plot_id", "tree_id", "stem_id"),
+  diam = "diam_cm",
+  census_date = "census_date",
+  census_date_vec = NULL, 
+  min_diam_threshold = 10,  # Minimum diameter threshold of the plot(s)
+  growth_max = 5,  # Maximum feasible annual diameter growth rate 
+  comment = "Overgrown recruit"
+)
+
+datatable(df_flagRecruitBig)
+```
+
+## Pre-recorded recruits
+
+```{r}
+#| echo: false
+displayHelp(flagRecruitPre)
+```
+
+```{r}
+df_flagRecruitPre <- flagRecruitPre(
+  x = s,
+  ind_id = c("site_id", "plot_id", "tree_id", "stem_id"),
+  census_id = "census_id",
+  target = c("diam_cm"),
+  comment = "Pre-census recruit"
+)
+
+datatable(df_flagRecruitPre)
+```
+
 
 # Miscellaneous checks
 
