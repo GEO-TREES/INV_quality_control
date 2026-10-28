@@ -11,7 +11,8 @@
 #' @param x `r param_x_stem()`
 #' @param meas_id `r param_id("individual measurements")`
 #' @param plot `r param_x_plot()`
-#' @param plot_id column name in `x` and `plot` with plot IDs
+#' @param plot_id column name(s) in `x` identifying plots, matching 
+#'     `plot_plot_id` in `plot`
 #' @param tree_id column name in `x` with tree IDs
 #' @param stem_id column name in `x` with stem IDs
 #' @param diam `r param_diam()`
@@ -20,6 +21,8 @@
 #' @param date column name in `x` with measurement dates
 #' @param plot_diam_min column name in `plot` with the minimum diameter 
 #'     threshold of each plot
+#' @param plot_plot_id column name(s) in `plot` identifying plots. Defaults 
+#'     to `plot_id`
 #' @param census_id `r param_census_id(optional = TRUE)`. The processing 
 #'     workflow expects one census per plot. If `x` contains more than one 
 #'     census, provide `census_id` so that measurements in different 
@@ -62,21 +65,22 @@
 #' )
 #' plot <- data.frame(plot_id = "A", meas_diam_min_cm = 5)
 #' 
-#' flagAgbExclude(stem, "record_id", plot, missing_diam = FALSE)
+#' flagAgbExclude(stem, "record_id", plot_id = "plot_id", tree_id = "tree_id", 
+#'   stem_id = "stem_id", diam = "diam_cm", code = "code", pom = "pom_m", 
+#'   date = "measurement_date", plot = plot, plot_diam_min = "meas_diam_min_cm",
+#'   missing_diam = FALSE)
 #' 
 #' @export
 #' 
-flagAgbExclude <- function(x, meas_id, plot, plot_id = "plot_id", 
-  tree_id = "tree_id", stem_id = "stem_id", diam = "diam_cm", code = "code", 
-  pom = "pom_m", date = "measurement_date", 
-  plot_diam_min = "meas_diam_min_cm", census_id = NULL, growth_form = NULL, 
-  missing_diam = TRUE, include_broken = TRUE, agbd_diam_min_cm = 0, 
-  growth_form_exclude = NULL, comment = NULL) {
+flagAgbExclude <- function(x, meas_id, plot_id, tree_id, stem_id, diam, code, 
+  pom, date, plot, plot_diam_min, plot_plot_id = plot_id, census_id = NULL, 
+  growth_form = NULL, missing_diam = TRUE, include_broken = TRUE, 
+  agbd_diam_min_cm = 0, growth_form_exclude = NULL, comment = NULL) {
 
   # Check input
   columnCatch(x, meas_id, plot_id, tree_id, stem_id, diam, code, pom, date, 
     census_id, growth_form)
-  columnCatch(plot, plot_id, plot_diam_min)
+  columnCatch(plot, plot_plot_id, plot_diam_min)
 
   d <- classCatch(x[[diam]], "numeric")
   cd <- ifelse(is.na(x[[code]]), "", as.character(x[[code]]))
@@ -101,7 +105,9 @@ flagAgbExclude <- function(x, meas_id, plot, plot_id = "plot_id",
   keep <- keep & first
 
   # Records used to estimate AGB density, see `agbdFilter()`
-  diam_min <- plot[[plot_diam_min]][match(x[[plot_id]], plot[[plot_id]])]
+  x_key <- do.call(paste, c(x[, plot_id, drop = FALSE], sep = "::"))
+  p_key <- do.call(paste, c(plot[, plot_plot_id, drop = FALSE], sep = "::"))
+  diam_min <- plot[[plot_diam_min]][match(x_key, p_key)]
   diam_min <- pmax(diam_min, agbd_diam_min_cm)
   below_min <- !is.na(d) & !is.na(diam_min) & d < diam_min
   broken <- grepl("B", cd) & !include_broken

@@ -26,13 +26,13 @@ The QA/QC workflow is provided as a Quarto notebook, `inst/INV_quality_control_n
 
 ### Focal census
 
-Each GEO-TREES acquisition contains one census of each plot, the focal census, which is submitted to INV_processing. Data from other censuses of the same plots are not submitted, but are very useful for finding errors in the focal census. Each census of a plot is identified by `census_id`, which must be an integer that increases with each census. The notebook loads all censuses, selects the focal census of each plot (by default the latest census, or a census chosen by the user), and then:
+Each GEO-TREES acquisition contains one census of each plot, the focal census, which is submitted to INV_processing. Data from other censuses of the same plots are not submitted, but are very useful for finding errors in the focal census. Each census of a plot is identified by `census_id`, which must be an integer that increases with each census. The notebook loads all censuses, selects the focal census of each plot, which must be chosen by the user, and then:
 
 1. Runs single-census checks on the focal census only.
-2. Runs multi-census checks on all censuses, then keeps only the issues which affect the focal census with `filterFocal()`.
+2. Runs multi-census checks on all censuses, then keeps only the issues which affect the focal census, by merging the results with the IDs of the focal census.
 3. Writes the focal census stem table, with only the columns in the INV_processing specification.
 
-The toolbox contains many small functions designed to check a single aspect of data quality in a tree inventory dataset. These functions are bundled into higher-level convenience functions that allow you to run many related checks in a single function call. 
+Simple checks, e.g. missing values, duplicated records, values outside a range, or plots of the data, are written as plain base R and ggplot2 code in the notebook, so that the QA/QC process is transparent. The toolbox contains functions for checks and corrections which need more complex code, each designed to check a single aspect of data quality in a tree inventory dataset. These functions are bundled into higher-level convenience functions that allow you to run many related checks in a single function call. 
 
 Some functions require multi-census data to identify potential issues, others require only single census data.
 
@@ -48,15 +48,7 @@ Below, is a description of all base-level functions, grouped by theme.
 
 ### Data format
 
-* `filterFocal()` - Keep only the issues found by a multi-census check which affect stems or measurements in the focal census.
-
 * `checkTableSpec()` - Check that a table has the columns, column order, column classes and value ranges required by INV_processing, reporting all issues at once.
-
-* `flagTableMatch()` - Flag ID values in one table which are missing from another, e.g. plots in the stem table which are not in the plot table, or taxonomic names missing from the taxonomy table.
-
-* `calcPlotArea()` - Calculate plot area from the relative coordinates of the plot corners, the denominator of AGB density.
-
-* `flagPlotArea()` - Flag plots where the declared plot dimensions do not match the area of the plot corners.
 
 ### Missing, duplicate and phantom records 
 
@@ -64,19 +56,9 @@ Below, is a description of all base-level functions, grouped by theme.
 
 * `flagRecordMissing()` - Flag stems with missing census records.
  
-* `flagRecordDup()` - Flag measurements where tree/stem/measurement IDs (records) are duplicated within a census.
-
-* `flagStemDupLoc()` - Flag stems from different trees with nearly identical coordinates and diameters, which may be the same stem recorded twice.
-
 * `flagRecordAbsent()` - Flag stems which were alive in their last measurement before the focal census, but have no record in the focal census.
 
-* `flagValMissing()` - Flag stem measurements where values are empty and must be filled, with user specification. Includes cross-column dependencies, e.g. diameter missing but stem is alive.
-
-* `flagValPresent()` - Flag stem measurements where values are present but must be empty, e.g. a diameter on a stem recorded as missing ("M") or broken below the POM ("T").
-
-* `flagRecruitPre()` - Flag stem measurements which were probably back-filled post-hoc and were not measured in the field, e.g. pre-recruitment.
-
-* `flagRecruitBig()` - Flag stem measurements as "overgrown recruit" if diameter in recruiting census is greater than a user-specified threshold. 
+* `flagRecruitBig()` - Flag recruits whose diameter is too large to have grown from the minimum diameter threshold of their plot since the previous census.
 
 ### Outlier values
 
@@ -84,17 +66,7 @@ Below, is a description of all base-level functions, grouped by theme.
 
 * `flagModOutlier()` - Flag stem measurements based on their residuals from a fitted model, e.g. a height-diameter model, on the scale of the model response.
 
-* `flagValRange()` - Flag stem measurements based on a user-supplied acceptable range.
-
-* `flagValUnit()` - Flag censuses where the variance of measurement data suggests a mix of units within a variable.
-
-* `flagValRound()` - Flag censuses where rounded measurement values are unusually common. Specify level of precision.
-
 * `flagValDigit()` - Flag groups with terminal digit preference, e.g. an excess of diameters ending in 0 or 5, using a chi-squared test against a uniform distribution of terminal digits.
-
-* `flagDiamMin()` - Flag stems below the minimum diameter threshold of their plot, from the plot meta-data table.
-
-* `flagBigStem()` - Flag stems which make up a large proportion of plot basal area, whose measurements have the greatest effect on plot AGB density.
 
 * `flagPomDefault()` - Flag POM values which differ from the plot default without a buttress ("U") or irregular stem ("I") code, codes which imply a raised POM at the default POM, and POM values in the wrong units.
 
@@ -104,12 +76,8 @@ Below, is a description of all base-level functions, grouped by theme.
 
 * `flagMultiLoc()` - Flag trees where any pairwise distance between stems is greater than a user-specified threshold.
 
-* `flagIdNest()` - Flag IDs nested within more than one parent ID, e.g. stems which belong to more than one tree, or trees with stems in more than one subplot.
-
 * `flagTaxonName()` - Flag taxon names with potential errors, such as "aceae" at the end of genus and species names, or non-standard character.
  
-* `flagMultiTaxon()` - Flag trees where stems differ in taxonomic name within a census.
-
 * `flagTaxonLevel()` - Flag stems which are not identified to species, classifying each name as identified to genus, family, or unidentified. These stems have genus, family or plot mean wood density in INV_processing.
 
 * `flagFormAlt()` - Flag taxa from known alternative growth-form groups, e.g. palms, tree ferns, bamboos, bananas, cycads, and possible strangler figs, that are not already labelled as such in `growth_form`, using a lookup table of families and genera.
@@ -122,15 +90,7 @@ Below, is a description of all base-level functions, grouped by theme.
 
 #### Flags
 
-* `flagPlotCorner()` - Flag plot corners where the GNSS coordinates do not fit the relative coordinates of the other corners, and plots where the scale between relative and GNSS coordinates differs from 1, e.g. slope distances or wrong units.
-
 * `flagStemOutside()` - Flag stems outside the boundary of their plot, defined by the plot corners, with the distance outside.
-
-* `flagTreeUnmapped()` - Flag trees where no stems have coordinates. INV_processing places these trees at random within their subplot or plot.
-
-#### Other
-
-* `inferSubplotBounds()` - Estimate the boundaries of each field subplot from the coordinates of the stems labelled with that subplot, for use with `correctLocSub()` and `plotStemMap()` when no table of subplot boundaries is available.
 
 ### Biomass estimation
 
@@ -141,8 +101,6 @@ Below, is a description of all base-level functions, grouped by theme.
 ### Time-series inconsistencies
 
 #### Flags
-
-* `flagTaxonSeries()` - Flag stems where taxonomic name differs among censuses.
 
 * `flagCodeSeries()` - Flag stems with inconsistent code timelines such as fallen to standing, dead to alive, following user specification.
 
@@ -178,11 +136,7 @@ Below, is a description of all base-level functions, grouped by theme.
 
 ### Miscellaenous 
 
-#### Flags
-
-* `flagMultiMany()` - Flag trees where the number of stems is greater than a user-specified threshold.
-
-* `summariseFlags()` - Count the number of records flagged by each check in a named list of flag outputs.
+#### Other
 
 * `decYear()` - Convert YYYY-MM-DD, YYYY-MM or YYYY dates to decimal years, matching `decDate()` in INV_processing.
 
@@ -193,11 +147,5 @@ Below, is a description of all base-level functions, grouped by theme.
 * TODO: `correctMultiLoc()` - Replace missing stem coordinates with the centroid of all other stems.
 
 #### Visualisation
-
-* `plotHistogram()` - create a histogram of a numeric variable
-
-* `plotScatter()` - create a 2D scatter plot of two numeric variables, with the option to flag outlier values.
-
-* `plotStemMap()` - create a map of stem locations within each plot, optionally sized by diameter, coloured by a flag, and with subplot boundaries.
 
 * `plotDiameterCorrections()` - plot original and corrected diameter timelines for each stem corrected by `correctDiameterSeries()`.

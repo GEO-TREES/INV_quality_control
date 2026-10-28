@@ -52,7 +52,7 @@ flagRecordAbsent <- function(x, ind_id, plot_id, census_id, status, focal,
   x[[status]] <- classCatch(x[[status]], "logical")
 
   # Order of each census, and of the focal census of each plot
-  ord <- censusOrder(x[[census_id]])
+  ord <- classCatch(x[[census_id]], "integer")
   plot_key <- do.call(paste, c(x[, plot_id, drop = FALSE], sep = "::"))
   stem_key <- do.call(paste, c(x[, ind_id, drop = FALSE], sep = "::"))
   focal_ord <- tapply(ord[focal], plot_key[focal], max)

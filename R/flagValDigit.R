@@ -22,9 +22,8 @@
 #' distributed. An excess of particular digits, typically 0 and 5, suggests 
 #' that values were estimated or rounded, e.g. by a particular field team. 
 #' For each group, a chi-squared goodness-of-fit test compares the frequency 
-#' of each terminal digit (0-9) to a uniform distribution. Unlike 
-#' `flagValRound()`, this test does not require an assumption about the 
-#' expected proportion of rounded values.
+#' of each terminal digit (0-9) to a uniform distribution. This test does 
+#' not require an assumption about the expected proportion of rounded values.
 #'
 #' @return dataframe with values of `group_id` with significant terminal 
 #'     digit preference, with the number of values, the proportion of 

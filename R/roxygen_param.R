@@ -99,10 +99,6 @@ param_cond <- function(optional = TRUE) {
   paste0(opt, "logical expression defining a condition for each row in 'x'. Rows where 'cond' is FALSE will not be checked")
 }
 
-param_min_diam_threshold <- function() {
-  "minimum diameter threshold for stem measurements in the plot(s)"
-}
-
 param_x_plot <- function() {
   "dataframe containing plot meta-data, one row per plot"
 }

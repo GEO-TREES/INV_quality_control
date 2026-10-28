@@ -69,7 +69,7 @@ flagPlotChange <- function(x, plot_id, census_id, census_date, target = NULL,
 
   # Compare to the previous census of each plot
   plot_key <- do.call(paste, c(tot[, plot_id, drop = FALSE], sep = "::"))
-  tot <- tot[order(plot_key, censusOrder(tot[[census_id]])), , drop = FALSE]
+  tot <- tot[order(plot_key, tot[[census_id]]), , drop = FALSE]
   plot_key <- do.call(paste, c(tot[, plot_id, drop = FALSE], sep = "::"))
   prev <- c(NA, seq_len(nrow(tot) - 1))
   prev[!duplicated(plot_key)] <- NA

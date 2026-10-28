@@ -55,7 +55,7 @@ flagDemogRate <- function(x, ind_id, plot_id, census_id, census_date, status,
   columnCatch(x, ind_id, plot_id, census_id, census_date, status)
 
   x[[status]] <- classCatch(x[[status]], "logical")
-  x$..ord.. <- censusOrder(x[[census_id]])
+  x$..ord.. <- classCatch(x[[census_id]], "integer")
   x$..date.. <- decYear(x[[census_date]])
   x$..stem.. <- do.call(paste, c(x[, ind_id, drop = FALSE], sep = "::"))
   plot_key <- do.call(paste, c(x[, plot_id, drop = FALSE], sep = "::"))

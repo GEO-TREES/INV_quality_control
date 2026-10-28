@@ -45,13 +45,13 @@ flagRecordMissing <- function(x, ind_id, census_id, census_id_vec = NULL,
 
   # If census ID vector not provided, guess from existing data
   if (is.null(census_id_vec)) {
-    message("'census_id_vec' not provided, guessing from values in 'census_id'")
     if (!is.null(plot_id)) {
       plot_key <- do.call(paste, c(x[, plot_id, drop = FALSE], sep = "::"))
       census_plot <- lapply(split(x[[census_id]], plot_key), function(y) {
         sort(unique(y))
       })
     } else {
+      message("'census_id_vec' not provided, guessing from values in 'census_id'")
       census_id_vec <- sort(unique(x[[census_id]])) 
     }
   } else {

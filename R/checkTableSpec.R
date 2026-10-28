@@ -143,11 +143,6 @@ checkTableSpec <- function(x, spec,
   }
   rownames(out) <- NULL
 
-  # Generate message
-  if (any(out$severity == "error")) {
-    message("Table does not match specification")
-  }
-
   # Return
   return(out)
 }

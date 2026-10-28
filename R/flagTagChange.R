@@ -8,7 +8,7 @@
 #' @param y_rel `r param_xy_rel("Y")`
 #' @param diam `r param_diam()`
 #' @param status `r param_status()`
-#' @param dist maximum distance (m) between a recruit and the stem it may 
+#' @param threshold maximum distance (m) between a recruit and the stem it may 
 #'     replace
 #' @param diam_tol maximum relative difference in diameter between a recruit
 #'     and the stem it may replace
@@ -45,14 +45,14 @@
 #' @export
 #' 
 flagTagChange <- function(x, ind_id, plot_id, census_id, x_rel, y_rel, diam, 
-  status, dist = 1, diam_tol = 0.1, comment = NULL) {
+  status, threshold = 1, diam_tol = 0.1, comment = NULL) {
 
   # Check input
   columnCatch(x, ind_id, plot_id, census_id, x_rel, y_rel, diam, status)
 
   x[[status]] <- classCatch(x[[status]], "logical")
   x[[diam]] <- classCatch(x[[diam]], "numeric")
-  x$..ord.. <- censusOrder(x[[census_id]])
+  x$..ord.. <- classCatch(x[[census_id]], "integer")
   x$..stem.. <- do.call(paste, c(x[, ind_id, drop = FALSE], sep = "::"))
   plot_key <- do.call(paste, c(x[, plot_id, drop = FALSE], sep = "::"))
 
@@ -79,10 +79,10 @@ flagTagChange <- function(x, ind_id, plot_id, census_id, x_rel, y_rel, diam,
         return(NULL)
       }
 
-      # Pairs of disappeared stems and recruits within `dist`
+      # Pairs of disappeared stems and recruits within `threshold`
       both <- rbind(gone, rec)
       p <- pairsWithin(classCatch(both[[x_rel]], "numeric"), 
-        classCatch(both[[y_rel]], "numeric"), dist)
+        classCatch(both[[y_rel]], "numeric"), threshold)
       p <- p[p$i <= nrow(gone) & p$j > nrow(gone), , drop = FALSE]
       if (nrow(p) == 0) {
         return(NULL)
@@ -120,4 +120,43 @@ flagTagChange <- function(x, ind_id, plot_id, census_id, x_rel, y_rel, diam,
 
   # Return
   return(out)
+}
+
+#' Find pairs of points within a distance of each other
+#'
+#' @param px numeric vector of X coordinates
+#' @param py numeric vector of Y coordinates
+#' @param d maximum distance
+#'
+#' @return dataframe with columns `i` and `j`, indices of pairs of points 
+#'     with `i < j`, and `dist`, the distance between them
+#' 
+#' @keywords internal
+#' @noRd
+#' 
+pairsWithin <- function(px, py, d) {
+  ok <- which(!is.na(px) & !is.na(py))
+  empty <- data.frame(i = integer(0), j = integer(0), dist = numeric(0))
+  if (length(ok) < 2) {
+    return(empty)
+  }
+
+  # Assign points to grid cells of size `d`, and compare points in 
+  # neighbouring cells only
+  cells <- data.frame(id = ok, cx = floor(px[ok] / d), cy = floor(py[ok] / d))
+  out <- do.call(rbind, lapply(-1:1, function(dx) {
+    do.call(rbind, lapply(-1:1, function(dy) {
+      nb <- cells
+      nb$cx <- nb$cx + dx
+      nb$cy <- nb$cy + dy
+      m <- merge(cells, nb, by = c("cx", "cy"), suffixes = c("_i", "_j"))
+      m <- m[m$id_i < m$id_j, , drop = FALSE]
+      data.frame(i = m$id_i, j = m$id_j)
+    }))
+  }))
+  out <- unique(out)
+  out$dist <- sqrt((px[out$i] - px[out$j])^2 + (py[out$i] - py[out$j])^2)
+  out <- out[out$dist <= d, , drop = FALSE]
+  rownames(out) <- NULL
+  out
 }

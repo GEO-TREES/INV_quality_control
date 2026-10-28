@@ -396,10 +396,14 @@ imputePairwise <- function(x_multi, x_split, ind_id, plot_id, census_date, diam,
 #' cannot be imputed and are silently omitted from the output.
 #'
 #' @return dataframe of rows in `x` where a diameter correction was applied,
-#'   containing the original `ind_id`, `census_date`, and `diam` columns plus:
-#'   - `diam_cor`: imputed diameter (rounded to `digits`)
-#'   - `correction_method`: `"stem mean"` or `"group mean"`
+#'   containing the original `ind_id`, `plot_id`, `census_date`, and `diam` 
+#'   columns plus:
+#'   - `diam_cor`: corrected diameter (rounded to `digits`)
+#'   - `correction_method`: `"shift realignment"`, `"stem mean"`, 
+#'     `"group mean"`, or a combination
 #'   - `comment` (if provided)
+#'   
+#'   The dataframe has no rows if no corrections are made.
 #'
 #' @export
 #'
@@ -407,8 +411,9 @@ imputePairwise <- function(x_multi, x_split, ind_id, plot_id, census_date, diam,
 #' x <- data.frame(
 #'   plot_id = "P1",
 #'   stem_id = rep(c("A", "B"), each = 5),
-#'   year = rep(c(2000, 2005, 2010, 2015, 2020), 2),
-#'   diameter = c(10, 11, 30, 13, 14, # spike at 2010
+#'   date = rep(c("2000-01-01", "2005-01-01", "2010-01-01", "2015-01-01", 
+#'     "2020-01-01"), 2),
+#'   diameter = c(10, 11, 50, 13, 14, # spike at 2010
 #'   10, 11, 12, 13, 14),
 #'   alive = TRUE,
 #'   pom = 1.3
@@ -417,7 +422,7 @@ imputePairwise <- function(x_multi, x_split, ind_id, plot_id, census_date, diam,
 #' correctDiameterSeries(x,
 #'   ind_id = "stem_id",
 #'   plot_id = "plot_id",
-#'   census_date = "year",
+#'   census_date = "date",
 #'   diam = "diameter",
 #'   status = "alive",
 #'   pom = "pom"
@@ -455,12 +460,18 @@ correctDiameterSeries <- function(x, ind_id, plot_id, census_date, diam, status,
   orig_diam_col <- paste0(".orig_", diam)
   x[[orig_diam_col]] <- x[[diam]]
 
+  # Empty output with the same columns, returned if no corrections are made
+  out_empty <- x[0, unique(c(ind_id, plot_id, diam)), drop = FALSE]
+  out_empty$diam_cor <- numeric(0)
+  out_empty$correction_method <- character(0)
+  out_empty[[census_date]] <- x[[census_date]][0]
+
   # Filter to multi-census stems ---------------------------------------------------
   n_cens <- tapply(x$.stem_key, x$.stem_key, length)
   x_multi <- x[x$.stem_key %in% names(n_cens[n_cens > 1L]), ]
 
   if (nrow(x_multi) == 0L) {
-    return(NULL)
+    return(out_empty)
   }
 
   x_split <- split(x_multi, x_multi$.stem_key)
@@ -511,7 +522,7 @@ correctDiameterSeries <- function(x, ind_id, plot_id, census_date, diam, status,
   # MERGE AND FORMAT OUTPUT
   # --------------------------------------------------------------------------------
   if (length(out_list) == 0L) {
-    return(NULL)
+    return(out_empty)
   }
   
   if (length(out_list) == 1L) {
@@ -600,10 +611,12 @@ plotDiameterCorrections <- function(x, cor, ind_id, census_date, diam, pom = NUL
   # Create continuous 'Final' diameter column 
   # uses original diam if no correction occurred that year
   plot_data$diam_final <- ifelse(is.na(plot_data$diam_cor), plot_data[[diam]], plot_data$diam_cor)
+
+  # Census dates as decimal years, so that censuses are spaced by time
+  plot_data$.date_dec <- decYear(plot_data[[census_date]])
   
   # Ensure chronological order for proper line drawing
-  plot_data <- plot_data[
-    do.call(order, plot_data[, c(".stem_key", census_date), drop = FALSE]), ]
+  plot_data <- plot_data[order(plot_data$.stem_key, plot_data$.date_dec), ]
   
   # Generate plots
   plots <- list()
@@ -612,7 +625,7 @@ plotDiameterCorrections <- function(x, cor, ind_id, census_date, diam, pom = NUL
     # Subset data for this specific stem
     stem_data <- plot_data[plot_data$.stem_key == stem, ]
     
-    p_plot <- ggplot2::ggplot(stem_data, ggplot2::aes(x = .data[[census_date]])) +
+    p_plot <- ggplot2::ggplot(stem_data, ggplot2::aes(x = .date_dec)) +
       
       # ORIGINAL Trajectory (Dashed Red)
       ggplot2::geom_line(ggplot2::aes(y = .data[[diam]], color = "Initial"), 
@@ -654,7 +667,7 @@ plotDiameterCorrections <- function(x, cor, ind_id, census_date, diam, pom = NUL
       
       # Title and Axis Labels
       ggplot2::labs(title = paste("Stem:", stem), 
-                    x = "Census Date", 
+                    x = "Census date (decimal year)", 
                     y = "Diameter (cm)")
     
     # Save plot to list using the stem key as the name

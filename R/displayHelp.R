@@ -55,7 +55,17 @@ displayHelp <- function(x, pkg = NULL, html = FALSE) {
     tc <- textConnection("s", "w", local = TRUE)
     on.exit(close(tc))
     tools:::Rd2HTML(help_file, out = tc, standalone = FALSE)
-    return(knitr::asis_output(htmltools::htmlPreserve(s)))
+
+    # Wrap in a labelled box, so the help file is distinct from the notebook
+    box <- c(
+      paste0('<div style="border: 1px solid #adb5bd; border-radius: 6px; ',
+        'padding: 0.5em 1em; margin: 1em 0; background-color: rgba(0, 0, 0, 0.03);">'),
+      paste0('<div style="font-size: 0.85em; color: #6c757d; ',
+        'border-bottom: 1px solid #dee2e6; margin-bottom: 0.5em;">',
+        'Help file: <code>', x_str, '</code></div>'),
+      s,
+      '</div>')
+    return(knitr::asis_output(htmltools::htmlPreserve(box)))
   } else {
     # Render as Plain Text
     txt <- capture.output(tools::Rd2txt(help_file))

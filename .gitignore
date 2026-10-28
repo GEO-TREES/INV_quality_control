@@ -5,3 +5,4 @@ inst/*_files/
 man/
 inst/flag_list.rds
 inst/stem_focal.csv
+Rplots.pdf

@@ -8,11 +8,17 @@
 #' quality issues (`flag*()`), and others which attempt to __correct__ these 
 #' issues (`correct*()`). 
 #' 
-#' Flag functions typically return a vector of `TRUE`/`FALSE` of the same length as the number of rows in the dataframe input, where `TRUE` indicates that the row has been flagged.
+#' Flag functions return a dataframe of the records which have been flagged,
+#' with the ID columns needed to identify each record, e.g. measurement, 
+#' stem, tree, census, or plot IDs, and the values which were checked. If no 
+#' records are flagged, the dataframe has no rows.
 #'
-#' Correction functions typically return a dataframe of the same length as the 
-#' number of rows in the dataframe input with adjusted values of one or more 
-#' variables along with an additional column describing the changes made.
+#' Correction functions return a dataframe of the records which have been 
+#' corrected, with the ID columns needed to identify each record, the 
+#' original and corrected values, and a column describing the correction.
+#'
+#' Simple checks, e.g. missing values or values outside a range, are written 
+#' as plain R code in the notebook, so that the QA/QC process is transparent.
 #'
 #' @docType package
 #' @name treeInvQC

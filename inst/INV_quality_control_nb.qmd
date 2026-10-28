@@ -12,10 +12,18 @@ format:
     toc-location: left
     toc-title: "Contents"
     number-sections: true
-    code-fold: "show"
+    code-fold: false
     df-print: "paged"
     page-layout: full
     html-math-method: katex
+    include-in-header:
+      text: |
+        <style>
+        /* Box around tables, matching the help files from displayHelp() */
+        .datatables { box-sizing: border-box; border: 1px solid #adb5bd;
+          border-radius: 6px; padding: 0.5em 1em; margin: 1em 0;
+          background-color: rgba(0, 0, 0, 0.03); }
+        </style>
     other-links:
       - text: GEO-TREES website
         href: https://geo-trees.org
@@ -42,12 +50,12 @@ Each GEO-TREES acquisition contains one census of each plot, the __focal
 census__, within a single site. The focal census is processed by the 
 [GEO-TREES tree inventory data processing pipeline](https://github.com/GEO-TREES/INV_processing) 
 to estimate above-ground woody biomass density (AGBD). The focal census should
-normally be the census closest in time to the airborne LiDAR (ALS) acquisition,
-either before or after. If you have data from other censuses of the same plots,
-they can also be included in this QC workflow. Data from other censuses are not
-used for GEO-TREES biomass estimation, but they can be useful for finding
-errors in the focal census, e.g. implausible diameter growth, stems which were
-missed, or taxonomic names which differ from previous censuses.
+normally be the census closest in time either before or after to the airborne
+LiDAR (ALS) acquisition. If you have data from other censuses of the same
+plots, they can also be included in this QC workflow. Data from other censuses
+are not used for GEO-TREES biomass estimation, but they can be useful for
+finding errors in the focal census, e.g. implausible diameter growth, stems
+which were missed, or taxonomic names which differ from previous censuses.
 
 The notebook has two parts:
 
@@ -98,11 +106,15 @@ devtools::install_github("GEO-TREES/INV_quality_control")
 
 ```{r}
 #| message: false
+#| warning: false
 library(treeInvQC)
 library(BIOMASS)  # Match taxonomic names to WFO `correctTaxo()`, fit diameter-height models `modelHD()`, wood density `getWoodDensity()`, AGB `computeAGB()`
-library(ggplot2)  # Augment `plotScatter()` and `plotHistogram()` 
 library(DT)  # Pretty tables in HTML notebooks
+library(ggplot2)  # Plots
+library(tibble)  # `tribble()` - create dataframes by row
+```
 
+```{r}
 theme_set(theme_bw())  # Set default ggplot2 theme
 ```
 
@@ -115,8 +127,8 @@ if (isTRUE(getOption("knitr.in.progress"))) {
 } 
 ```
 
-Throughout the notebook we display the help files for the different functions
-in the notebook using the `displayHelp()` function. Below is the help file for
+Throughout the notebook we display the help files for different functions
+using the `displayHelp()` function. Below is the help file for
 the `treeInvQC` R package:
 
 ```{r}
@@ -151,26 +163,27 @@ table, and wood density measurement table.
 Edit the code below to load your tree inventory data in the GEO-TREES L0 data
 format.
 
-Load stem measurement table, including all censuses of each plot. In addition
-to the GEO-TREES L0 columns, the stem measurement table must contain an
-`alive` column, with the mortality status of each stem measurement: `TRUE`
-for alive, `FALSE` for dead, or `NA` if unknown. This column is used by many
-of the checks below, but is not submitted to INV_processing.
+The example data loaded below are from the Bicuar site in Angola. Known errors
+have been added to the example data by `bicuar_test_data/02_add_errors.R`, so
+that the checks in this notebook have issues to find. The errors which were
+added are listed in `bicuar_test_data/out_errors/errors_added.csv`.
+
+Load stem measurement table, including all censuses of each plot:
 
 ```{r}
-s <- read.csv("../../bicuar_test_data/out/stem.csv")
+s <- read.csv("../../bicuar_test_data/out_errors/stem.csv")
 ```
 
 Load plot meta-data table:
 
 ```{r}
-p <- read.csv("../../bicuar_test_data/out/plot.csv")
+p <- read.csv("../../bicuar_test_data/out_errors/plot.csv")
 ```
 
 Load plot geo-location table:
 
 ```{r}
-pt <- read.csv("../../bicuar_test_data/out/plot_pt.csv")
+pt <- read.csv("../../bicuar_test_data/out_errors/plot_pt.csv")
 ```
 
 Optionally load taxonomy table:
@@ -194,14 +207,19 @@ Optionally load additional wood density data:
 wd <- read.csv("wood_density_example.csv")
 ```
 
-Columns which uniquely identify each stem measurement, each stem, each tree,
-and each plot are used by many checks below.
+Optionally load a table of subplot boundaries:
+
+```{r}
+subs <- read.csv("../../bicuar_test_data/out_errors/subplot.csv")
+```
+
+Columns which uniquely identify each stem measurement, stem, tree,
+and plot are used by many checks below.
 
 With multi-census data, stem measurements must include the census ID
 (`census_id`), which identifies the census of each plot. The order of censuses
 is taken from `census_id`, so values must be integers which increase with each
-census of a plot, e.g. `1`, `2`, `3`. By default, the last census of each plot
-is the focal census.
+census of a plot, e.g. `1`, `2`, `3`. 
 
 ```{r}
 id_meas <- c("site_id", "plot_id", "census_id", "tree_id", "stem_id", "measurement_id")
@@ -212,37 +230,77 @@ id_plot <- c("site_id", "plot_id")
 
 ## Focal census
 
-By default, the latest census of each plot is the focal census. To choose the
-focal census of each plot yourself, e.g. the census closest to the ALS
-acquisition, provide a dataframe to `focal`, with one row per plot, specifying
-the `census_id` for each plot.
+Choose the focal census of each plot, e.g. the census closest to the ALS
+acquisition that will be provided to GEO-TREES for biomass estimation. Provide
+a dataframe to `focal`, with one row per plot, specifying the `census_id` for
+each plot. The notebook stops if a plot has more than one focal census, or if a
+focal census is not in the stem measurement table.
 
 ```{r}
-focal <- NULL
-# focal <- data.frame(
-#   site_id = "Bicuar",
-#   plot_id = c("P2", "P3"),
-#   census_id = c(2, 3))
+# Focal census of each plot. Edit for your data
+focal <- tribble(
+  ~site_id, ~plot_id, ~census_id,
+  "Bicuar", "B1",     1,
+  "Bicuar", "B2",     1,
+  "Bicuar", "M2",     2,
+  "Bicuar", "M3",     2,
+  "Bicuar", "O1",     1,
+  "Bicuar", "O2",     1,
+  "Bicuar", "P2",     3,
+  "Bicuar", "P3",     3,
+  "Bicuar", "P4",     3,
+  "Bicuar", "P5",     3,
+  "Bicuar", "P6",     3,
+  "Bicuar", "P7",     3,
+  "Bicuar", "P8",     3,
+  "Bicuar", "P9",     3,
+  "Bicuar", "P10",    3,
+  "Bicuar", "P11",    3,
+  "Bicuar", "P12",    3,
+  "Bicuar", "P13",    3,
+  "Bicuar", "P14",    3,
+  "Bicuar", "P15",    3,
+  "Bicuar", "P16",    2
+)
+```
 
-if (is.null(focal)) {
-  # Latest census of each plot
-  s$focal <- s$census_id == ave(s$census_id, s$site_id, s$plot_id, FUN = max)
-} else {
-  s$focal <- paste(s$site_id, s$plot_id, s$census_id) %in%
-    paste(focal$site_id, focal$plot_id, focal$census_id)
+```{r}
+# Each plot must have only one focal census
+if (any(duplicated(focal[, id_plot]))) {
+  stop("Plots with more than one focal census in `focal`")
+}
+
+# Each focal census must be in the stem measurement table
+focal_key <- paste(focal$site_id, focal$plot_id, focal$census_id)
+s_key <- paste(s$site_id, s$plot_id, s$census_id)
+if (!all(focal_key %in% s_key)) {
+  stop("Focal censuses not in the stem measurement table: ",
+    paste(setdiff(focal_key, s_key), collapse = ", "))
+}
+
+s$focal <- s_key %in% focal_key
+
+# Plots without a focal census are not checked in Part I of this notebook
+plot_none <- setdiff(unique(paste(s$site_id, s$plot_id)),
+  paste(focal$site_id, focal$plot_id))
+if (length(plot_none) > 0) {
+  message("Plots without a focal census: ", paste(plot_none, collapse = ", "))
 }
 
 message(sum(s$focal), " measurements in the focal census of ",
   nrow(unique(s[s$focal, id_plot])), " plots")
 
 # Stem measurements in the focal census
-sf <- s[s$focal, ]
+s_focal <- s[s$focal, ]
 ```
+
+Visualise the census timeline of each plot.
 
 ```{r}
 #| fig-height: 6
-# Censuses of each plot, with the focal census highlighted
 cens <- unique(s[, c("plot_id", "census_id", "census_date", "focal")])
+
+# Convert census dates to decimal years
 cens$census_date_dec <- decYear(cens$census_date)
 
 ggplot(cens, aes(x = census_date_dec, y = plot_id)) + 
@@ -252,35 +310,78 @@ ggplot(cens, aes(x = census_date_dec, y = plot_id)) +
   labs(x = "Census date", y = "Plot", fill = "Focal census")
 ```
 
-### Data overview
+## Thresholds
+
+The thresholds used by the checks below are defined here, so that they can be
+adjusted in one place for your forest type and measurement protocols. The
+defaults are suitable for most tropical forests. The INV_processing
+parameters should match the parameters in `param.yaml` which will be used to
+process your data.
 
 ```{r}
-#| fig-height: 6
-# Number of stem records in each plot census
-ggplot(s, aes(x = plot_id, fill = factor(census_id))) + 
-  geom_bar(position = "dodge", aes(colour = focal)) + 
-  scale_colour_manual(values = c("TRUE" = "black", "FALSE" = NA), guide = "none") + 
-  labs(x = "Plot", y = "Number of stem records", fill = "Census") + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# Plausible ranges of measurements
+diam_max_cm <- 200  # Maximum stem diameter (cm)
+height_max_m <- 50  # Maximum stem height (m)
+pom_tol_m <- 0.05  # Tolerance when comparing the average POM of stems to the plot default (m)
+
+# Outliers and measurement precision
+height_resid_max <- 3  # Maximum height-diameter model residual (residual SDs)
+ba_share_max <- 0.05  # Maximum proportion of plot basal area in one stem
+unit_ratio_max <- 5  # Maximum ratio between plot mean diameter and the median of all plots
+diam_cv_max <- 100  # Maximum coefficient of variation of diameter in a plot (%)
+round_prop_max <- 0.3  # Maximum proportion of diameters which are whole numbers of cm
+digit_prop_max <- 0.15  # Maximum proportion of diameters with the same terminal digit
+
+# Measurement dates
+als_date <- NULL  # Date of the matching ALS acquisition, e.g. "2024-03"
+date_diff_max_yr <- 1  # Maximum difference between measurement dates and `als_date` (decimal years)
+date_span_max_yr <- 1  # Maximum spread of measurement dates within a plot (decimal years)
+
+# Stem locations and trees
+outside_tol_m <- 0  # Distance a stem can be outside the plot boundary (m)
+subplot_tol_m <- 1  # Distance a stem can be outside its subplot (m)
+tree_stem_dist_max_m <- 5  # Maximum distance between stems of a tree (m)
+tree_stem_max <- 12  # Maximum number of stems per tree
+
+# Changes between censuses
+change_ann_max <- 0.05  # Maximum annual relative change in plot totals (%, e.g. 5%)
+change_ann_max_subplot <- 0.1  # Maximum annual relative change in subplot totals (%, e.g. 10%)
+demog_rate_max <- 0.05  # Maximum annual mortality or recruitment rate
+tag_dist_max_m <- 1  # Maximum distance between a recruit and a disappeared stem (m)
+tag_diam_tol <- 0.1  # Maximum relative difference in diameter of a retagged stem
+growth_min_cm_yr <- -2  # Minimum annual diameter growth (cm)
+growth_max_cm_yr <- 4  # Maximum annual diameter growth (cm)
+recruit_growth_max_cm_yr <- 5  # Maximum annual diameter growth of recruits (cm)
+loc_change_max_m <- 2  # Maximum change in stem location between censuses (m)
+
+# INV_processing parameters, see `param.yaml`
+inv_missing_diam_impute <- TRUE  # `missing_diam_method: "impute"`
+inv_include_broken <- TRUE  # `include_broken`
+inv_agbd_diam_min_cm <- 0  # `agbd_diam_min_cm`
+inv_growth_form_exclude <- NULL  # `growth_form_exclude`
 ```
 
+Tables of flagged records are shown with the function below, which shows a
+message instead of an empty table if no records are flagged:
+
 ```{r}
-#| fig-height: 8
-# Composition of stem codes in each plot census. A sudden change in the focal
-# census may indicate a change in field protocol or data entry errors
-ggplot(s, aes(x = factor(census_id), fill = code)) + 
-  geom_bar(position = "fill") + 
-  scale_y_continuous(labels = scales::percent) + 
-  facet_wrap(~plot_id) + 
-  labs(x = "Census", y = "Percentage of stem records", fill = "Code")
+showFlags <- function(x) {
+  if (NROW(x) == 0) {
+    message("No records flagged")
+  } else {
+    datatable(as.data.frame(x))
+  }
+}
 ```
 
 # Part I: Focal census checks
 
-The checks in this part use only the focal census, `sf`, which will be
+The checks in this part of the notebook use only the focal census, `s_focal`, which will be
 submitted to the GEO-TREES tree inventory data processing pipeline.
 
 ## Data format 
+
+### Check table columns
 
 `checkTableSpec()` checks your data against the column specifications in the
 [INV_processing templates](https://github.com/GEO-TREES/INV_processing/tree/main/templates) 
@@ -291,247 +392,142 @@ and reports any issues.
 displayHelp(checkTableSpec)
 ```
 
-```{r}
-# `allow_extra = TRUE` allows columns which are useful during QA/QC, e.g.
-# `census_id`. Only the columns in the specification are written to the focal
-# census stem table at the end of this notebook
-df_checkTableSpec_stem <- checkTableSpec(sf, "stem", allow_extra = TRUE)
-datatable(df_checkTableSpec_stem)
-```
-
-```{r}
-df_checkTableSpec_plot <- checkTableSpec(p, "plot")
-datatable(df_checkTableSpec_plot)
-```
-
-```{r}
-df_checkTableSpec_pt <- checkTableSpec(pt, "pt")
-datatable(df_checkTableSpec_pt)
-```
 
 Rows with `severity` "error" must be fixed before the data can be processed.
 Rows with `severity` "warning" can be fixed by coercing the column to the
 correct class, e.g. `s$subplot_id <- as.character(s$subplot_id)`.
 
-### Matching IDs among tables
+```{r}
+# `allow_extra = TRUE` allows columns which are useful during QA/QC, e.g.
+# `census_id`. Only the columns in the specification are written to the focal
+# census stem table at the end of this notebook
+df_checkTableSpec_stem <- checkTableSpec(s_focal, "stem", allow_extra = TRUE)
+showFlags(df_checkTableSpec_stem)
+```
+
+Check the plot meta-data table in the same way:
 
 ```{r}
-#| echo: false
-displayHelp(flagTableMatch)
+df_checkTableSpec_plot <- checkTableSpec(p, "plot")
+showFlags(df_checkTableSpec_plot)
 ```
+
+Check the plot geo-location table in the same way:
+
+```{r}
+df_checkTableSpec_pt <- checkTableSpec(pt, "pt")
+showFlags(df_checkTableSpec_pt)
+```
+
+### Matching IDs among tables
 
 Every plot in the stem measurement table must be in the plot meta-data table,
 and every plot in the plot meta-data table must have geo-location points:
 
 ```{r}
-df_flagTableMatch_stem_plot <- flagTableMatch(sf, p, id_plot,
-  comment = "Plot in stem table missing from plot table")
-datatable(df_flagTableMatch_stem_plot)
+# Plots in the stem table which are missing from the plot table
+df_plotMissing <- setdiff(unique(s_focal$plot_id), p$plot_id)
+showFlags(df_plotMissing)
 
-df_flagTableMatch_plot_pt <- flagTableMatch(p, pt, id_plot,
-  comment = "Plot in plot table missing from plot geo-location table")
-datatable(df_flagTableMatch_plot_pt)
+# Plots in the plot table which are missing from the geo-location table
+df_ptMissing <- setdiff(p$plot_id, pt$plot_id)
+showFlags(df_ptMissing)
 ```
 
-If you have provided optional tables, check that they match the stem table:
+If you have provided optional tables, check that they match the stem table.
+Every taxonomic name in the stem table must be in the taxonomy table:
 
 ```{r}
 #| eval: false
 # Every taxonomic name in the stem table must be in the taxonomy table
-df_flagTableMatch_stem_tx <- flagTableMatch(sf, tx, "taxon_name")
+df_taxonMissing <- setdiff(unique(s_focal$taxon_name), tx$taxon_name)
+showFlags(df_taxonMissing)
+```
 
+Wood density measurements of taxa which are not in the stem table are not
+used by INV_processing:
+
+```{r}
+#| eval: false
 # Wood density measurements of taxa not in the stem table are not used
-df_flagTableMatch_wd_stem <- flagTableMatch(wd, sf, "taxon_name")
-```
-
-### Plot area
-
-```{r}
-#| echo: false
-displayHelp(calcPlotArea)
-```
-
-```{r}
-plot_area <- calcPlotArea(pt, "plot_id", "x_rel_m", "y_rel_m")
-datatable(plot_area)
-```
-
-AGB density is the sum of stem AGB divided by plot area, so an error in plot
-area gives a proportional error in AGB density. If the plot meta-data table
-contains the plot dimensions, check that they match the plot corners:
-
-```{r}
-#| echo: false
-displayHelp(flagPlotArea)
-```
-
-```{r}
-if (all(c("plot_length_m", "plot_width_m") %in% names(p))) {
-  df_flagPlotArea <- flagPlotArea(p, pt, "plot_id", "plot_length_m", 
-    "plot_width_m", "x_rel_m", "y_rel_m", tol = 0.01,
-    comment = "Declared plot area differs from plot corners")
-} else {
-  df_flagPlotArea <- NULL
-  message("Plot dimensions not in plot meta-data table")
-}
-
-datatable(df_flagPlotArea)
+df_wdMissing <- setdiff(wd$taxon_name, s_focal$taxon_name)
+showFlags(df_wdMissing)
 ```
 
 ## Missing, duplicated, and phantom records
 
 ### Duplicated records
 
-```{r}
-#| echo: false
-displayHelp(flagRecordDup)
-```
-
-```{r}
-# Flag duplicated records based on ID values
-df_flagRecordDup <- flagRecordDup(
-  x = sf, 
-  meas_id = id_meas,
-  comment = "Duplicated measurement record"
-)
-
-datatable(df_flagRecordDup)
-```
-
 Duplicated records should be merged or removed. There should only be one
 measurement for each concatenation of
 `site_id`+`plot_id`+`census_id`+`tree_id`+`stem_id`+`measurement_id`.
 
-### Duplicated stems
-
 ```{r}
-#| echo: false
-displayHelp(flagStemDupLoc)
+# Measurement records with duplicated ID values
+df_recordDup <- s_focal[duplicated(s_focal[, id_meas]), id_meas]
+showFlags(df_recordDup)
 ```
-
-```{r}
-df_flagStemDupLoc <- flagStemDupLoc(
-  x = sf,
-  meas_id = id_meas,
-  plot_id = id_plot,
-  x_rel = "x_rel_m",
-  y_rel = "y_rel_m",
-  diam = "diam_cm",
-  tree_id = "tree_id",
-  dist = 0.2,
-  diam_tol = 0.05,
-  comment = "Possible duplicated stem"
-)
-
-datatable(df_flagStemDupLoc)
-```
-
-Stems with different tree IDs, almost the same coordinates, and almost the
-same diameter, may be the same stem recorded twice, e.g. with an old and a new
-tag. Duplicated stems are counted twice in AGB density.
 
 ### Missing values
 
-```{r}
-#| echo: false
-displayHelp(flagValMissing)
-```
+Some columns must never contain `<NA>` values, particularly ID values. 
 
 ```{r}
-df_flagValMissing <- flagValMissing(
-  x = sf,
-  meas_id = id_meas,
-  target = c(
-    "site_id", 
-    "plot_id", 
-    "tree_id", 
-    "stem_id", 
-    "census_id", 
-    "measurement_date", 
-    "taxon_name",
-    "code"
-  ),
-  cond = NULL,
-  comment = "Missing measurement values"
-)
+# Columns which must never be empty
+cols_req <- c("site_id", "plot_id", "tree_id", "stem_id", "census_id", 
+  "measurement_date", "taxon_name", "code")
+is_empty <- is.na(s_focal[, cols_req]) | s_focal[, cols_req] == ""
+df_valMissing <- s_focal[rowSums(is_empty, na.rm = TRUE) > 0, c(id_meas, cols_req)]
 
-datatable(df_flagValMissing)
-```
-
-Some columns must never contain `<NA>` values, particularly ID values. Stems
-without a `code` are excluded from AGB estimates by INV_processing. Stems may
-be missing coordinates, see [Trees without coordinates](#trees-without-coordinates).
-
-```{r}
-df_flagValMissing_diam_cm <- flagValMissing(
-  x = sf,
-  meas_id = id_meas,
-  target = "diam_cm",
-  cond = grepl("A", sf$code) & !grepl("T|F|M", sf$code),
-  comment = "Missing diameter values"
-)
-
-datatable(df_flagValMissing_diam_cm)
+showFlags(df_valMissing)
 ```
 
 Some columns are only allowed to contain missing values under certain
 conditions. For example, living and standing stems should always have a
-diameter measurement. INV_processing imputes the diameter of these stems by 
-default, which increases the uncertainty of AGB density.
+diameter measurement. 
 
 ```{r}
-df_flagValMissing_pom_m <- flagValMissing(
-  x = sf,
-  meas_id = id_meas,
-  target = "pom_m",
-  cond = !is.na(sf$diam_cm),
-  comment = "Missing POM values"
-)
+# Live stems without a diameter, which are not fallen, missing, or broken 
+# below the POM
+df_diamMissing <- s_focal[is.na(s_focal$diam_cm) & grepl("A", s_focal$code) & 
+  !grepl("[TFM]", s_focal$code), c(id_meas, "code", "diam_cm")]
 
-datatable(df_flagValMissing_pom_m)
+showFlags(df_diamMissing)
 ```
 
 If a stem has a diameter measurement then it should have a Point of Measurement (POM) value.
 
+```{r}
+# Stems with a diameter but no POM
+df_pomMissing <- s_focal[!is.na(s_focal$diam_cm) & is.na(s_focal$pom_m), 
+  c(id_meas, "diam_cm", "pom_m")]
+
+showFlags(df_pomMissing)
+```
+
+
 ### Values which should be empty
 
-```{r}
-#| echo: false
-displayHelp(flagValPresent)
-```
+Missing stems ("M") should not have diameter measurements, POM
+or height measurement. Stems broken below the POM ("T") should not have 
+diameter measurements:
 
 ```{r}
-df_flagValPresent_missing <- flagValPresent(
-  x = sf,
-  meas_id = id_meas,
-  target = c("diam_cm", "pom_m", "height_m"),
-  cond = grepl("M", sf$code),
-  comment = "Missing stem with measurement values"
-)
+# Stems recorded as missing ("M") with a diameter, POM or height
+df_valPresentMissing <- s_focal[grepl("M", s_focal$code) & 
+  (!is.na(s_focal$diam_cm) | !is.na(s_focal$pom_m) | !is.na(s_focal$height_m)), 
+  c(id_meas, "code", "diam_cm", "pom_m", "height_m")]
 
-datatable(df_flagValPresent_missing)
+showFlags(df_valPresentMissing)
 
-df_flagValPresent_broken <- flagValPresent(
-  x = sf,
-  meas_id = id_meas,
-  target = "diam_cm",
-  cond = grepl("T", sf$code),
-  comment = "Stem broken below POM with diameter"
-)
+# Stems broken below the POM ("T") with a diameter
+df_diamBroken <- s_focal[grepl("T", s_focal$code) & !is.na(s_focal$diam_cm), 
+  c(id_meas, "code", "diam_cm")]
 
-datatable(df_flagValPresent_broken)
+showFlags(df_diamBroken)
 ```
-
-INV_processing stops if a stem recorded as missing ("M") has a diameter, POM
-or height measurement, and warns if a stem broken below the POM ("T") has a
-diameter measurement.
 
 ## Diameter and height measurements
-
-```{r}
-#| echo: false
-displayHelp(plotHistogram)
-```
 
 Inspect the distribution of diameter measurements. Are all measurements larger
 than the minimum diameter threshold of the plot? Are any measurements
@@ -539,16 +535,12 @@ unrealistically large?
 
 ```{r}
 # Plot a histogram
-plotHistogram(
-	x = sf$diam_cm[!is.na(sf$diam_cm)], 
-	boundary = 0,  # Align bars with 0
-	colour = "black",  # Make pretty 
-	fill = "grey"
-) + 
-  xlab("Stem diameter (cm)")  # Add x axis label
+ggplot(s_focal[!is.na(s_focal$diam_cm), ], aes(x = diam_cm)) + 
+  geom_histogram(binwidth = 5, boundary = 0, colour = "black", fill = "grey") + 
+  labs(x = "Stem diameter (cm)", y = "Number of stems")
 
 # Summarise values
-summary(sf$diam_cm)
+summary(s_focal$diam_cm)
 ```
 
 Diameter distributions in natural forests normally decline steeply from the
@@ -559,9 +551,10 @@ scale makes the large stems, which dominate AGB, easier to see.
 
 ```{r}
 #| fig-height: 8
+#| warning: false
 diam_min <- p[, c("plot_id", "meas_diam_min_cm")]
 
-ggplot(sf[!is.na(sf$diam_cm), ], aes(x = diam_cm)) + 
+ggplot(s_focal[!is.na(s_focal$diam_cm), ], aes(x = diam_cm)) + 
   geom_histogram(binwidth = 2, boundary = 0, fill = "grey", colour = "black") + 
   geom_vline(data = diam_min, aes(xintercept = meas_diam_min_cm), 
     colour = "red", linetype = 2) + 
@@ -576,7 +569,8 @@ has been a major disturbance:
 
 ```{r}
 #| fig-height: 8
-ggplot(s[s$alive %in% TRUE & !is.na(s$diam_cm), ], 
+#| warning: false
+ggplot(s[grepl("A", s$code) & !is.na(s$diam_cm), ], 
   aes(x = diam_cm, colour = factor(census_id), linewidth = focal)) + 
   geom_freqpoly(binwidth = 5, boundary = 0) + 
   scale_y_log10() + 
@@ -586,70 +580,48 @@ ggplot(s[s$alive %in% TRUE & !is.na(s$diam_cm), ],
     colour = "Census", linewidth = "Focal census")
 ```
 
+Live stems should be at or above the minimum diameter threshold of their plot,
+`meas_diam_min_cm` in the plot meta-data table. Stems below the minimum
+diameter threshold have their own AGB estimate in INV_processing, but are not
+included in AGB density. Many stems below the threshold may indicate that the
+threshold in the plot meta-data table is wrong, or that diameters are in the
+wrong units:
+
 ```{r}
-#| echo: false
-displayHelp(flagDiamMin)
+# Live stems below the minimum diameter threshold of their plot
+diam_min_cm <- p$meas_diam_min_cm[match(s_focal$plot_id, p$plot_id)]
+df_diamMin <- cbind(s_focal[, c(id_meas, "diam_cm")], diam_min_cm)[
+  which(grepl("A", s_focal$code) & s_focal$diam_cm < diam_min_cm), ]
+
+showFlags(df_diamMin)
 ```
 
-```{r}
-df_flagDiamMin <- flagDiamMin(
-  x = sf,
-  meas_id = id_meas,
-  plot_id = "plot_id",
-  diam = "diam_cm",
-  plot = p,
-  plot_diam_min = "meas_diam_min_cm",
-  cond = grepl("A", sf$code),
-  comment = "Live stem below minimum diameter threshold"
-)
-
-datatable(df_flagDiamMin)
-```
-
-Stems below the minimum diameter threshold have their own AGB estimate in
-INV_processing, but are not included in AGB density.
+Diameters must be greater than 0 in INV_processing, and diameters greater than
+`diam_max_cm` are very rare:
 
 ```{r}
-#| echo: false
-displayHelp(flagValRange)
-```
+# Diameters outside a plausible range (cm)
+df_diamRange <- s_focal[which(s_focal$diam_cm <= 0 | s_focal$diam_cm > diam_max_cm), c(id_meas, "diam_cm")]
 
-```{r}
-df_flagValOutlier_diam_cm <- flagValRange(
-  x = sf,
-  meas_id = id_meas,
-  target = "diam_cm",
-  threshold = c(0, 200),
-  comment = "Diameter measurements outside range"
-)
-
-datatable(df_flagValOutlier_diam_cm)
+showFlags(df_diamRange)
 ```
 
 ### Large stems
 
-```{r}
-#| echo: false
-displayHelp(flagBigStem)
-```
-
-```{r}
-df_flagBigStem <- flagBigStem(
-  x = sf,
-  meas_id = id_meas,
-  plot_id = id_plot,
-  diam = "diam_cm",
-  threshold = 0.05,
-  cond = grepl("A", sf$code),
-  comment = "Stem with large share of plot basal area"
-)
-
-datatable(df_flagBigStem)
-```
-
 A single data entry error in the diameter of a large stem can change plot AGB
-density more than errors in many small stems. Check that the diameters of the
-largest stems in each plot are correct.
+density more than errors in many small stems. Stems with more than
+`ba_share_max` of the basal area of live stems in their plot are listed
+below. Check that the diameters of the largest stems in each plot are
+correct:
+
+```{r}
+ba <- ifelse(grepl("A", s_focal$code) & !is.na(s_focal$diam_cm), s_focal$diam_cm^2, 0)
+ba_share <- ba / ave(ba, s_focal$plot_id, FUN = sum)
+df_bigStem <- cbind(s_focal[, c(id_meas, "diam_cm")], ba_share)[ba_share > ba_share_max, ]
+df_bigStem <- df_bigStem[order(-df_bigStem$ba_share), ]
+
+showFlags(df_bigStem)
+```
 
 ### Height measurements
 
@@ -683,134 +655,95 @@ df_flagModOutlier_height_m_diam_cm_all <- flagModOutlier(
   mod = hmod$model, 
   x_var = "diam_cm",
   y_var = "height_m",
-  threshold = 3,
+  threshold = height_resid_max,
   comment = "Height-diameter model outlier"
 )
 
-datatable(df_flagModOutlier_height_m_diam_cm_all)
+showFlags(df_flagModOutlier_height_m_diam_cm_all)
 
-df_flagModOutlier_height_m_diam_cm <- filterFocal(
-  df_flagModOutlier_height_m_diam_cm_all, sf, id_meas)
+# Outliers in the focal census
+df_flagModOutlier_height_m_diam_cm <- merge(
+  df_flagModOutlier_height_m_diam_cm_all, unique(s_focal[, id_meas]))
 ```
 
-```{r}
-#| echo: false
-displayHelp(plotScatter)
-```
+Plot heights against diameters, with the fitted model, and the outliers
+highlighted. These outliers are not necessarily errors, but do deserve closer
+inspection:
 
 ```{r}
-# Create scatter plot with outliers flagged, and the fitted model
 s_hd <- merge(s_h, df_flagModOutlier_height_m_diam_cm_all[, c(id_meas, "comment")], 
   all.x = TRUE)
+s_hd$outlier <- !is.na(s_hd$comment)
 hd_line <- data.frame(diam_cm = seq(min(s_h$diam_cm), max(s_h$diam_cm), 
   length.out = 100))
 hd_line$height_m <- predict(hmod$model, newdata = data.frame(D = hd_line$diam_cm))
 
-plotScatter(
-  x = s_hd$diam_cm, 
-  y = s_hd$height_m, 
-  flag = ifelse(is.na(s_hd$comment), "Not flagged", s_hd$comment),
-  alpha = 0.5) + 
-  geom_line(data = hd_line, aes(x = diam_cm, y = height_m), inherit.aes = FALSE) + 
-  labs(x = "Stem diameter (cm)", y = "Stem height (m)", colour = NULL)
+ggplot(s_hd, aes(x = diam_cm, y = height_m)) + 
+  geom_point(aes(colour = outlier), alpha = 0.5) + 
+  geom_line(data = hd_line) + 
+  scale_colour_manual(values = c("TRUE" = "red", "FALSE" = "grey50")) + 
+  labs(x = "Stem diameter (cm)", y = "Stem height (m)", colour = "Model outlier")
 ```
 
-These outliers are not necessarily errors, but do deserve closer inspection.
+Heights must be greater than 0 in INV_processing, and heights greater than
+`height_max_m` are rare:
 
 ```{r}
-df_flagValOutlier_height_m <- flagValRange(
-  x = sf,
-  meas_id = id_meas,
-  target = "height_m",
-  threshold = c(0, 50),
-  comment = "Height measurements outside range"
-)
+# Heights outside a plausible range (m)
+df_heightRange <- s_focal[which(s_focal$height_m <= 0 | s_focal$height_m > height_max_m), 
+  c(id_meas, "height_m")]
 
-datatable(df_flagValOutlier_height_m)
-```
-
-If INV_processing fits a local height-diameter model (`height_method:
-"field"`), heights of the largest stems are extrapolated from the model if
-there are no height measurements of large stems. Check that the height
-measurements cover the diameter range of the stems, especially the large
-stems which make up most of the AGB:
-
-```{r}
-diam_h_max <- max(s_h$diam_cm)
-ba <- pi * (sf$diam_cm / 200)^2
-ba_above <- sum(ba[sf$diam_cm > diam_h_max], na.rm = TRUE) / sum(ba, na.rm = TRUE)
-
-message(sprintf(
-  "Largest stem with a height measurement: %.1f cm. %.1f%% of basal area in the focal census is in larger stems",
-  diam_h_max, 100 * ba_above))
-
-h_cover <- rbind(
-  data.frame(diam_cm = sf$diam_cm[!is.na(sf$diam_cm)], 
-    data = "Stems in focal census"),
-  data.frame(diam_cm = s_h$diam_cm, data = "Height measurements"))
-
-ggplot(h_cover, aes(x = diam_cm, colour = data)) + 
-  geom_freqpoly(binwidth = 5, boundary = 0) + 
-  scale_y_log10() + 
-  labs(x = "Stem diameter (cm)", y = "Number of stems", colour = NULL)
+showFlags(df_heightRange)
 ```
 
 ## Measurement precision
 
-The checks in this section are run on all censuses, so that the focal census
-can be compared to other censuses of the same plot, and then filtered to the
-focal census.
-
 ### Unit mixtures
 
-```{r}
-#| echo: false
-displayHelp(flagValUnit)
-```
+Diameters recorded in the wrong units, e.g. in mm rather than cm, give very
+wrong AGB estimates. Plots where the mean diameter is more than
+`unit_ratio_max` times larger or smaller than the median of all plots may be
+in the wrong units. Plots where diameters are very variable, with a
+coefficient of variation (%) greater than `diam_cv_max`, may contain a mix of
+units:
 
 ```{r}
-df_flagValUnit_all <- flagValUnit(
-  x = s,
-  plot_id = "plot_id",
-  census_id = "census_id",
-  target = "diam_cm",
-  threshold = 5, 
-  cv_threshold = 100,
-  comment = "Diameter unit-shift"
-)
+# Mean and coefficient of variation (%) of diameter in each plot
+diam_summ <- aggregate(diam_cm ~ plot_id, data = s_focal, 
+  FUN = function(i) { c(mean = mean(i), cv = 100 * sd(i) / mean(i)) })
+diam_summ <- do.call(data.frame, diam_summ)
+names(diam_summ) <- c("plot_id", "diam_mean", "diam_cv")
 
-datatable(df_flagValUnit_all)
+diam_mean_all <- median(diam_summ$diam_mean)
+df_valUnit <- diam_summ[
+  diam_summ$diam_mean > unit_ratio_max * diam_mean_all | 
+  diam_summ$diam_mean < diam_mean_all / unit_ratio_max | 
+  diam_summ$diam_cv > diam_cv_max, ]
 
-df_flagValUnit <- filterFocal(df_flagValUnit_all, sf, c("plot_id", "census_id"))
+showFlags(df_valUnit)
 ```
 
 ### Rounded values
 
-```{r}
-#| echo: false
-displayHelp(flagValRound)
-```
+If diameters are measured to the nearest mm, about 10% should be whole
+numbers of cm. A much higher proportion implies poor measurement precision.
+Plots where the proportion of diameters which are whole numbers of cm is
+greater than `round_prop_max` are listed below:
 
 ```{r}
-df_flagValRound_diam_cm_all <- flagValRound(
-  x = s, 
-  census_id = c("plot_id", "census_id"),
-  target = "diam_cm",
-  precision = 1, 
-  threshold = 0.3,
-  comment = "Rounded diameter values"
-)
+df_valRound <- aggregate(diam_cm ~ plot_id, data = s_focal, 
+  FUN = function(i) { mean(i == round(i)) })
+names(df_valRound)[2] <- "prop_round"
+df_valRound <- df_valRound[df_valRound$prop_round > round_prop_max, ]
 
-datatable(df_flagValRound_diam_cm_all)
-
-df_flagValRound_diam_cm <- filterFocal(df_flagValRound_diam_cm_all, sf, 
-  c("plot_id", "census_id"))
+showFlags(df_valRound)
 ```
-
-`flagValRound()` finds groups with improbably high proportions of rounded
-measurement values, which might imply poor measurement precision.
 
 ### Terminal digit preference
+
+An excess of terminal digits 0 and 5 suggests that diameters were estimated
+or rounded, rather than read from the tape. This increases diameter
+measurement error, and may indicate that some stems were not measured.
 
 ```{r}
 #| echo: false
@@ -818,52 +751,54 @@ displayHelp(flagValDigit)
 ```
 
 ```{r}
-df_flagValDigit_diam_cm_all <- flagValDigit(
-  x = s,
-  group_id = c("plot_id", "census_id"),
+df_flagValDigit_diam_cm <- flagValDigit(
+  x = s_focal,
+  group_id = "plot_id",
   target = "diam_cm",
   digits = 1,
+  max_prop = digit_prop_max,
   comment = "Terminal digit preference in diameter"
 )
 
-datatable(df_flagValDigit_diam_cm_all)
-
-df_flagValDigit_diam_cm <- filterFocal(df_flagValDigit_diam_cm_all, sf, 
-  c("plot_id", "census_id"))
+showFlags(df_flagValDigit_diam_cm)
 ```
+
+Plot the proportion of diameters ending in each digit, in each plot. The
+dashed line shows the expected proportion if digits are uniformly
+distributed:
 
 ```{r}
 #| fig-height: 8
-# Proportion of diameters ending in each digit, in each plot census. The 
-# dashed line shows the expected proportion if digits are uniformly 
-# distributed
 digit <- data.frame(
-  plot_id = s$plot_id, 
-  census_id = factor(s$census_id), 
-  focal = s$focal,
-  digit = factor(round(s$diam_cm * 10) %% 10))
+  plot_id = s_focal$plot_id, 
+  digit = factor(round(s_focal$diam_cm * 10) %% 10))
 digit <- digit[!is.na(digit$digit), ]
 
-ggplot(digit, aes(x = digit, fill = census_id)) + 
-  geom_bar(aes(y = after_stat(prop), group = census_id), position = "dodge") + 
+ggplot(digit, aes(x = digit)) + 
+  geom_bar(aes(y = after_stat(prop), group = 1), fill = "grey", colour = "black") + 
   geom_hline(yintercept = 0.1, linetype = 2) + 
   facet_wrap(~plot_id) + 
-  labs(x = "Terminal digit of diameter (mm)", y = "Proportion of stems", 
-    fill = "Census")
+  labs(x = "Terminal digit of diameter (mm)", y = "Proportion of stems")
 ```
-
-An excess of terminal digits 0 and 5 suggests that diameters were estimated
-or rounded, rather than read from the tape. This increases diameter
-measurement error, and may indicate that some stems were not measured.
 
 ## Point of measurement (POM)
 
+Inspect the distribution of POM values. Most stems should be measured at the
+default POM of the plot, `meas_pom_default_m` in the plot meta-data table,
+normally 1.3 m:
+
 ```{r}
-ggplot(sf[!is.na(sf$pom_m), ], aes(x = pom_m)) + 
+#| warning: false
+ggplot(s_focal[!is.na(s_focal$pom_m), ], aes(x = pom_m)) + 
   geom_histogram(binwidth = 0.1, boundary = 0, fill = "grey", colour = "black") + 
   scale_y_log10() + 
   labs(x = "POM (m)", y = "Number of stems")
 ```
+
+INV_processing can correct diameters measured above 1.3 m to their equivalent
+at 1.3 m using a taper model. Stems measured above the default POM because of
+buttresses should have the "U" code, and stems measured away from the default
+POM because of irregularities should have the "I" code.
 
 ```{r}
 #| echo: false
@@ -872,7 +807,7 @@ displayHelp(flagPomDefault)
 
 ```{r}
 df_flagPomDefault <- flagPomDefault(
-  x = sf,
+  x = s_focal,
   meas_id = id_meas,
   plot_id = "plot_id",
   pom = "pom_m",
@@ -880,29 +815,31 @@ df_flagPomDefault <- flagPomDefault(
   plot = p,
   plot_pom_default = "meas_pom_default_m",
   code_raised = c("U", "I"),
-  tol = 0.05,
+  tol = pom_tol_m,
   comment = "POM inconsistent with plot default"
 )
 
-datatable(df_flagPomDefault)
+showFlags(df_flagPomDefault)
 ```
 
+Plot POM against diameter. Stems measured above the default POM are normally
+large, buttressed stems:
+
 ```{r}
-# POM against diameter. Stems measured above the default POM are normally 
-# large, buttressed stems
-ggplot(sf[!is.na(sf$pom_m) & !is.na(sf$diam_cm), ], 
+ggplot(s_focal[!is.na(s_focal$pom_m) & !is.na(s_focal$diam_cm), ], 
   aes(x = diam_cm, y = pom_m, colour = grepl("[UI]", code))) + 
   geom_jitter(width = 0, height = 0.02, alpha = 0.5) + 
   geom_hline(data = p, aes(yintercept = meas_pom_default_m), linetype = 2) + 
   labs(x = "Stem diameter (cm)", y = "POM (m)", colour = "Raised POM code")
 ```
 
-INV_processing can correct diameters measured above 1.3 m to their equivalent
-at 1.3 m using a taper model. Stems measured above the default POM because of
-buttresses should have the "U" code, and stems measured away from the default
-POM because of irregularities should have the "I" code.
-
 ## Stem condition codes
+
+`flagCodeVal()` identifies measurements either with invalid values in the
+`code` column, or invalid combinations or codes. For example, a stem cannot be
+dead ("D") and alive ("A") at the same time, or standing ("S") and fallen
+("F"). INV_processing stops if any of these are found. The valid codes are
+described in the [INV_processing templates](https://github.com/GEO-TREES/INV_processing/blob/main/templates/stem_codes.csv).
 
 ```{r}
 #| echo: false
@@ -911,7 +848,7 @@ displayHelp(flagCodeVal)
 
 ```{r}
 df_flagCodeVal <- flagCodeVal(
-  x = sf,
+  x = s_focal,
   meas_id = id_meas,
   target = "code",
   accepted = c("A", "D", "S", "F", "M", "B", "T", "U", "I", "H"),
@@ -924,18 +861,16 @@ df_flagCodeVal <- flagCodeVal(
   comment = "Invalid code values"
 )
 
-datatable(df_flagCodeVal)
+showFlags(df_flagCodeVal)
 ```
 
-`flagCodeVal()` identifies measurements either with invalid values in the
-`code` column, or invalid combinations or codes. For example, a stem cannot be
-dead ("D") and alive ("A") at the same time, or standing ("S") and fallen
-("F"). INV_processing stops if any of these are found. The valid codes are
-described in the [INV_processing templates](https://github.com/GEO-TREES/INV_processing/blob/main/templates/stem_codes.csv).
+A stem which was not found ("M") cannot have its condition recorded. Only
+"A" or "D" can be combined with "M", e.g. "AM" for a stem known to be alive,
+but which was not found during this census:
 
 ```{r}
 df_flagCodeVal_missing <- flagCodeVal(
-  x = sf,
+  x = s_focal,
   meas_id = id_meas,
   target = "code",
   invalid_comb = list(
@@ -950,14 +885,31 @@ df_flagCodeVal_missing <- flagCodeVal(
   comment = "Condition codes on missing stem"
 )
 
-datatable(df_flagCodeVal_missing)
+showFlags(df_flagCodeVal_missing)
 ```
 
-A stem which was not found ("M") cannot have its condition recorded. Only
-"A" or "D" can be combined with "M", e.g. "AM" for a stem known to be alive,
-but which was not found during this census.
+Every code must record whether the stem is alive or dead ("A" or "D"), and,
+unless the stem was not found ("M"), whether it is standing or fallen ("S" or
+"F"). INV_processing only includes stems with both "A" and "S" in AGB
+estimates, and excludes stems broken below the POM ("T") or not found ("M").
+A live, standing stem whose code is missing "A" or "S" is excluded from AGB
+estimates without a warning:
+
+```{r}
+# Codes without a mortality status, or without a standing status
+df_codeIncomplete <- s_focal[!grepl("[AD]", s_focal$code) | 
+  (!grepl("[SF]", s_focal$code) & !grepl("M", s_focal$code)), c(id_meas, "code")]
+
+showFlags(df_codeIncomplete)
+```
 
 ## Measurement dates
+
+GEO-TREES acquisitions should contain one census per plot, which should
+generally be within one year of the corresponding airborne LiDAR acquisition.
+Set `als_date` in [Thresholds](#thresholds) to check this. Measurement dates spread over a long
+period within one plot may indicate that measurements from more than one 
+census have been mixed.
 
 ```{r}
 #| echo: false
@@ -966,39 +918,29 @@ displayHelp(flagMeasDate)
 
 ```{r}
 df_flagMeasDate <- flagMeasDate(
-  x = sf,
+  x = s_focal,
   meas_id = id_meas,
   plot_id = id_plot,
   date = "measurement_date",
-  ref_date = NULL,  # Date of the matching ALS acquisition, e.g. "2024-03"
-  max_diff = 1,
-  max_span = 1,
+  ref_date = als_date,
+  max_diff = date_diff_max_yr,
+  max_span = date_span_max_yr,
   comment = "Suspect measurement date"
 )
 
-datatable(df_flagMeasDate)
+showFlags(df_flagMeasDate)
 ```
 
+Plot the range of measurement dates in the focal census of each plot:
+
 ```{r}
-# Range of measurement dates in the focal census of each plot
-ggplot(sf, aes(x = decYear(measurement_date), y = plot_id)) + 
+ggplot(s_focal, aes(x = decYear(measurement_date), y = plot_id)) + 
   geom_boxplot(outlier.shape = 1) + 
   scale_x_continuous(labels = function(i) sprintf("%.2f", i)) + 
   labs(x = "Measurement date (decimal year)", y = "Plot")
 ```
 
-GEO-TREES acquisitions should contain one census per plot, which should
-generally be within one year of the corresponding airborne LiDAR acquisition.
-Provide `ref_date` to check this. Measurement dates spread over a long
-period within one plot may indicate that measurements from more than one 
-census have been mixed.
-
 ## Stem coordinate issues
-
-```{r}
-#| echo: false
-displayHelp(plotStemMap)
-```
 
 Inspect the spatial distribution of stems within each plot. Are any stems
 outside the plot, or distributed unevenly within the plot?
@@ -1006,55 +948,19 @@ outside the plot, or distributed unevenly within the plot?
 ```{r}
 #| fig-height: 10
 # Plot stem coordinates, sized by diameter
-plotStemMap(sf, "x_rel_m", "y_rel_m", plot_id = "plot_id", diam = "diam_cm")
+ggplot(s_focal, aes(x = x_rel_m, y = y_rel_m, size = diam_cm)) + 
+  geom_point(shape = 21, colour = "grey30", na.rm = TRUE) + 
+  scale_size_area(max_size = 4) + 
+  coord_equal() + 
+  facet_wrap(~plot_id) + 
+  labs(x = "X (m)", y = "Y (m)", size = "Diameter (cm)")
 ```
-
-### Plot corner coordinates
-
-```{r}
-#| echo: false
-displayHelp(flagPlotCorner)
-```
-
-```{r}
-df_flagPlotCorner <- flagPlotCorner(
-  pt = pt,
-  plot_id = "plot_id",
-  point_id = "point_id",
-  x_rel = "x_rel_m",
-  y_rel = "y_rel_m",
-  x_proj = "rover_easting_utm_m",
-  y_proj = "rover_northing_utm_m",
-  threshold = 10,  # `corner_outlier_dist_m` in INV_processing
-  scale_tol = 0.05,
-  comment = "Plot corner inconsistent with stem map"
-)
-
-datatable(df_flagPlotCorner)
-```
-
-```{r}
-#| fig-height: 6
-# Residuals and fitted scale of all plot corners
-corner_fit <- flagPlotCorner(pt, "plot_id", "point_id", "x_rel_m", "y_rel_m", 
-  "rover_easting_utm_m", "rover_northing_utm_m", threshold = 10, 
-  scale_tol = -Inf)
-
-ggplot(corner_fit, aes(x = plot_id, y = residual_m)) + 
-  geom_point(aes(colour = abs(scale - 1) > 0.05), size = 2) + 
-  geom_hline(yintercept = 10, linetype = 2) + 
-  labs(x = "Plot", y = "Distance from fitted corner position (m)", 
-    colour = "Scale differs\nfrom 1 by >5%") + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
-```
-
-INV_processing fits a polygon to the GNSS coordinates of the plot corners to
-place stems in their geographic location. Corners which do not fit the
-relative coordinates of the other corners are removed, and if the area of the
-fitted polygon differs from the area defined by the relative coordinates by
-more than 5%, a warning is given. 
 
 ### Stems outside the plot
+
+Stems outside the quadrat grid of their plot are excluded from quadrat AGB
+density estimates by INV_processing, unless they are within
+`outside_max_dist_m` of a quadrat.
 
 ```{r}
 #| echo: false
@@ -1063,68 +969,83 @@ displayHelp(flagStemOutside)
 
 ```{r}
 df_flagStemOutside <- flagStemOutside(
-  x = sf,
+  x = s_focal,
   meas_id = id_meas,
   plot_id = "plot_id",
   x_rel = "x_rel_m",
   y_rel = "y_rel_m",
   pt = pt,
-  tol = 0,
+  tol = outside_tol_m,
   comment = "Stem outside plot boundary"
 )
 
-datatable(df_flagStemOutside)
+showFlags(df_flagStemOutside)
 ```
+
+Map stems outside the plot boundary:
 
 ```{r}
 #| fig-height: 10
-# Map stems outside the plot boundary
-sf_out <- merge(sf, df_flagStemOutside[, c(id_meas, "comment")], all.x = TRUE)
+sf_out <- merge(s_focal, df_flagStemOutside[, c(id_meas, "comment")], all.x = TRUE)
+sf_out$outside <- !is.na(sf_out$comment)
+sf_out <- sf_out[order(sf_out$outside), ]
 
-plotStemMap(sf_out, "x_rel_m", "y_rel_m", plot_id = "plot_id", 
-  flag = sf_out$comment)
+ggplot(sf_out, aes(x = x_rel_m, y = y_rel_m, colour = outside)) + 
+  geom_point(size = 0.8, na.rm = TRUE) + 
+  scale_colour_manual(values = c("TRUE" = "red", "FALSE" = "grey70")) + 
+  coord_equal() + 
+  facet_wrap(~plot_id) + 
+  labs(x = "X (m)", y = "Y (m)", colour = "Outside plot")
 ```
-
-Stems outside the quadrat grid of their plot are excluded from quadrat AGB
-density estimates by INV_processing, unless they are within
-`outside_max_dist_m` of a quadrat.
 
 ### Stem coordinates relative to subplots
 
+If you have loaded a table of field subplot boundaries, `subs`, check that
+stems are located inside their labelled subplot. If you do not have a table
+of subplot boundaries, add `#| eval: false` to the code chunks below, so that
+they are not run when the notebook is rendered.
+
 `correctLocSub()` checks whether XY coordinates match with subplot coordinates
 and optionally re-locates incongruously located stems to the center of their
-subplot.
-
-If you have a table of subplot boundaries, e.g. `subplot.csv` for
-INV_processing, use that as `subs` below. Otherwise, `inferSubplotBounds()`
-estimates the boundaries of each subplot from the coordinates of the stems
-labelled with that subplot. Stems from all censuses are used, as subplot 
-layouts do not normally change among censuses.
+subplot. Stems without coordinates are excluded, as they are not located
+outside their subplot. If `correct = TRUE`, stems outside their subplot are
+given the coordinates of the centre of the subplot. In INV_processing, trees
+without coordinates are placed at random within the extent of their subplot,
+so stems with wrong coordinates or subplot IDs affect AGB density estimates.
 
 ```{r}
-#| echo: false
-displayHelp(inferSubplotBounds)
+# Results are empty if no subplot table is provided
+df_correctLocSub <- NULL
 ```
+
+Check the subplot table against the INV_processing specification:
 
 ```{r}
-subs <- inferSubplotBounds(
-  x = s,
-  subplot_id = c("plot_id", "subplot_id"),
-  x_rel = "x_rel_m",
-  y_rel = "y_rel_m",
-  snap = 10  # Round boundaries outwards to a 10 m grid
-)
-
-datatable(subs)
+df_checkTableSpec_subs <- checkTableSpec(subs, "subplot")
+showFlags(df_checkTableSpec_subs)
 ```
+
+Map the subplots over the stems, to check that subplots tile each plot
+without overlapping:
 
 ```{r}
-#| fig-height: 10
-# Check that inferred subplots tile each plot without overlapping
-plotStemMap(sf, "x_rel_m", "y_rel_m", plot_id = "plot_id", 
-  flag = as.character(sf$subplot_id), subs = subs) + 
-  theme(legend.position = "none")
+#| fig-height: 6
+# Stems in plots with subplot boundaries
+s_sub <- s_focal[s_focal$plot_id %in% subs$plot_id, ]
+
+ggplot(s_sub, aes(x = x_rel_m, y = y_rel_m)) +
+  geom_rect(data = subs,
+    aes(xmin = x_rel_min_m, xmax = x_rel_max_m, ymin = y_rel_min_m, ymax = y_rel_max_m),
+    inherit.aes = FALSE, fill = NA, colour = "grey50") +
+  geom_point(aes(colour = factor(subplot_id)), size = 0.6, na.rm = TRUE) +
+  coord_equal() +
+  facet_wrap(~plot_id) +
+  theme(legend.position = "none") +
+  labs(x = "X (m)", y = "Y (m)")
 ```
+
+Check whether stems are inside their labelled subplot, allowing a tolerance
+of `subplot_tol_m`, and suggest corrected coordinates at the centre of the subplot:
 
 ```{r}
 #| echo: false
@@ -1132,68 +1053,73 @@ displayHelp(correctLocSub)
 ```
 
 ```{r}
-# Check if stem measurements located inside the correct subplot 
-# according to relative coordinates and subplot ID.
 df_correctLocSub <- correctLocSub(
-  x = sf[!is.na(sf$x_rel_m) & !is.na(sf$y_rel_m), ],
+  x = s_sub[!is.na(s_sub$x_rel_m) & !is.na(s_sub$y_rel_m), ],
   meas_id = id_meas,
   subplot_id = c("plot_id", "subplot_id"),
   x_rel = "x_rel_m",
   y_rel = "y_rel_m",
   subs = subs,
   subs_subplot_id = c("plot_id", "subplot_id"),
-  subs_x_min = "x_min",
-  subs_x_max = "x_max",
-  subs_y_min = "y_min",
-  subs_y_max = "y_max",
-  tol = 1,
+  subs_x_min = "x_rel_min_m",
+  subs_x_max = "x_rel_max_m",
+  subs_y_min = "y_rel_min_m",
+  subs_y_max = "y_rel_max_m",
+  tol = subplot_tol_m,
   correct = TRUE,
   comment = "Stem coordinates outside subplot"
 )
 
-datatable(df_correctLocSub)
+showFlags(df_correctLocSub)
 ```
+
+Map stems outside their subplot:
 
 ```{r}
-#| fig-height: 10
-sf_sub <- merge(sf, df_correctLocSub[, c(id_meas, "comment")], all.x = TRUE)
+#| fig-height: 6
+sf_sub <- merge(s_sub, df_correctLocSub[, c(id_meas, "comment")], all.x = TRUE)
+sf_sub$outside <- !is.na(sf_sub$comment)
+sf_sub <- sf_sub[order(sf_sub$outside), ]
 
-plotStemMap(sf_sub, "x_rel_m", "y_rel_m", plot_id = "plot_id", 
-  flag = sf_sub$comment, subs = subs)
+ggplot(sf_sub, aes(x = x_rel_m, y = y_rel_m)) +
+  geom_rect(data = subs,
+    aes(xmin = x_rel_min_m, xmax = x_rel_max_m, ymin = y_rel_min_m, ymax = y_rel_max_m),
+    inherit.aes = FALSE, fill = NA, colour = "grey50") +
+  geom_point(aes(colour = outside), size = 0.6, na.rm = TRUE) +
+  scale_colour_manual(values = c("TRUE" = "red", "FALSE" = "grey70")) +
+  coord_equal() +
+  facet_wrap(~plot_id) +
+  labs(x = "X (m)", y = "Y (m)", colour = "Outside subplot")
 ```
-
-Stems without coordinates are excluded above, as they are not located
-outside their subplot. If `correct = TRUE`, stems outside their subplot are
-given the coordinates of the centre of the subplot. In INV_processing, trees
-without coordinates are placed at random within the extent of their subplot,
-so stems with wrong coordinates or subplot IDs affect AGB density estimates.
 
 ### Trees without coordinates
 
+INV_processing places trees without coordinates at random within their
+subplot or plot, in each AGB simulation. This increases the uncertainty of
+quadrat AGB density, especially where large trees are unmapped. Trees where
+no stems have coordinates are listed below:
+
 ```{r}
-#| echo: false
-displayHelp(flagTreeUnmapped)
+# Trees where no stems have coordinates, with their number of stems and basal
+# area
+tree_key <- do.call(paste, s_focal[, id_tree])
+has_xy <- !is.na(s_focal$x_rel_m) & !is.na(s_focal$y_rel_m)
+unmapped <- !tree_key %in% tree_key[has_xy]
+df_treeUnmapped <- aggregate(
+  list(n_stem = rep(1, sum(unmapped)), 
+    ba_m2 = pi * (s_focal$diam_cm[unmapped] / 200)^2), 
+  by = s_focal[unmapped, id_tree], FUN = sum, na.rm = TRUE)
+
+showFlags(df_treeUnmapped)
 ```
 
-```{r}
-df_flagTreeUnmapped <- flagTreeUnmapped(
-  x = sf,
-  ind_id = id_tree,
-  x_rel = "x_rel_m",
-  y_rel = "y_rel_m",
-  diam = "diam_cm",
-  comment = "Tree without stem coordinates"
-)
-
-datatable(df_flagTreeUnmapped)
-```
+Plot the percentage of basal area in each plot in unmapped trees:
 
 ```{r}
-# Percentage of basal area in each plot in unmapped trees
-ba_plot <- aggregate(list(ba_m2 = pi * (sf$diam_cm / 200)^2), 
-  by = list(plot_id = sf$plot_id), FUN = sum, na.rm = TRUE)
-ba_unmapped <- aggregate(list(ba_m2_unmapped = df_flagTreeUnmapped$ba_m2), 
-  by = list(plot_id = df_flagTreeUnmapped$plot_id), FUN = sum)
+ba_plot <- aggregate(list(ba_m2 = pi * (s_focal$diam_cm / 200)^2), 
+  by = list(plot_id = s_focal$plot_id), FUN = sum, na.rm = TRUE)
+ba_unmapped <- aggregate(list(ba_m2_unmapped = df_treeUnmapped$ba_m2), 
+  by = list(plot_id = df_treeUnmapped$plot_id), FUN = sum)
 ba_plot <- merge(ba_plot, ba_unmapped, all.x = TRUE)
 ba_plot$ba_m2_unmapped[is.na(ba_plot$ba_m2_unmapped)] <- 0
 ba_plot$pct_unmapped <- 100 * ba_plot$ba_m2_unmapped / ba_plot$ba_m2
@@ -1204,11 +1130,11 @@ ggplot(ba_plot, aes(x = plot_id, y = pct_unmapped)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-INV_processing places trees without coordinates at random within their
-subplot or plot, in each AGB simulation. This increases the uncertainty of
-quadrat AGB density, especially where large trees are unmapped.
-
 ### Coordinates of multi-stemmed trees
+
+The stems of a multi-stemmed tree should be close to each other. Trees where
+any two stems are more than 5 m apart may have wrong stem coordinates, or
+stems assigned to the wrong tree:
 
 ```{r}
 #| echo: false
@@ -1217,45 +1143,51 @@ displayHelp(flagMultiLoc)
 
 ```{r}
 df_flagMultiLoc <- flagMultiLoc(
-  x = sf,
+  x = s_focal,
   ind_id = id_tree,
   census_id = "census_id",
   x_rel = "x_rel_m",
   y_rel = "y_rel_m",
-  threshold = 5,
+  threshold = tree_stem_dist_max_m,
   comment = "Multi-stemmed tree with incongruous stem coordinates"
 )
 
-datatable(df_flagMultiLoc)
+showFlags(df_flagMultiLoc)
 ```
 
 ### Tree and stem IDs
 
-```{r}
-#| echo: false
-displayHelp(flagIdNest)
-```
+INV_processing combines the stems of each tree into a single equivalent
+diameter to estimate AGB, and assigns the tree to a quadrat using the centroid
+of its stems. The stems of a tree should normally be in the same subplot:
 
 ```{r}
 # Trees with stems in more than one subplot
-df_flagIdNest_tree <- flagIdNest(
-  x = sf,
-  group_id = id_plot,
-  parent_id = "subplot_id",
-  child_id = "tree_id",
-  comment = "Tree in more than one subplot"
-)
+tree_sub <- aggregate(subplot_id ~ site_id + plot_id + tree_id, data = s_focal, 
+  FUN = function(i) { paste(unique(i), collapse = "; ") })
+df_treeMultiSubplot <- tree_sub[grepl("; ", tree_sub$subplot_id), ]
 
-datatable(df_flagIdNest_tree)
+showFlags(df_treeMultiSubplot)
 ```
 
-INV_processing combines the stems of each tree into a single equivalent
-diameter to estimate AGB, and assigns the tree to a quadrat using the centroid
-of its stems.
+Trees with very many stems may be several trees which have been given the
+same tree ID. Trees with more than `tree_stem_max` stems are listed below:
+
+```{r}
+tree_n <- aggregate(list(n_stem = rep(1, nrow(s_focal))), by = s_focal[, id_tree], FUN = sum)
+df_treeManyStems <- tree_n[tree_n$n_stem > tree_stem_max, ]
+
+showFlags(df_treeManyStems)
+```
 
 ## Taxonomic name issues 
 
 ### Basic orthographic and nomenclature issues
+
+Taxonomic names should only contain letters and spaces, and family names
+should end in "-aceae". Names with other characters, e.g. "?" or ".", or
+genus and species names ending in "-aceae", may not be matched to the World
+Flora Online database by INV_processing:
 
 ```{r}
 #| echo: false
@@ -1264,7 +1196,7 @@ displayHelp(flagTaxonName)
 
 ```{r}
 df_flagTaxonName <- flagTaxonName(
-  x = sf,
+  x = s_focal,
   meas_id = id_meas,
   taxon_name = "taxon_name",
   family = NULL, 
@@ -1274,10 +1206,16 @@ df_flagTaxonName <- flagTaxonName(
   comment = "Taxonomic name issue"
 )
 
-datatable(df_flagTaxonName)
+showFlags(df_flagTaxonName)
 ```
 
 ### Taxonomic resolution
+
+Stems which are not identified to species have their wood density estimated
+at genus, family or plot level by INV_processing, which increases the
+uncertainty of their AGB estimates. If you have morphospecies codes, check
+that they are consistently formatted, e.g. "Brachystegia sp1" rather than a
+mix of "Brachystegia sp1" and "Brachystegia sp. 1".
 
 ```{r}
 #| echo: false
@@ -1286,21 +1224,22 @@ displayHelp(flagTaxonLevel)
 
 ```{r}
 df_flagTaxonLevel <- flagTaxonLevel(
-  x = sf,
+  x = s_focal,
   meas_id = id_meas,
   taxon_name = "taxon_name",
   comment = "Stem not identified to species"
 )
 
-datatable(df_flagTaxonLevel)
+showFlags(df_flagTaxonLevel)
 ```
 
+Plot the percentage of live basal area at each taxonomic level in each plot:
+
 ```{r}
-# Percentage of live basal area at each taxonomic level, per plot
-s_lev <- merge(sf, df_flagTaxonLevel[, c(id_meas, "taxon_level")], all.x = TRUE)
+s_lev <- merge(s_focal, df_flagTaxonLevel[, c(id_meas, "taxon_level")], all.x = TRUE)
 s_lev$taxon_level[is.na(s_lev$taxon_level)] <- "species"
 s_lev$ba_m2 <- pi * (s_lev$diam_cm / 200)^2
-s_lev <- s_lev[s_lev$alive %in% TRUE & !is.na(s_lev$ba_m2), ]
+s_lev <- s_lev[grepl("A", s_lev$code) & !is.na(s_lev$ba_m2), ]
 
 ggplot(s_lev, aes(x = plot_id, weight = ba_m2, fill = taxon_level)) + 
   geom_bar(position = "fill") + 
@@ -1309,11 +1248,13 @@ ggplot(s_lev, aes(x = plot_id, weight = ba_m2, fill = taxon_level)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-If you have morphospecies codes, check that they are consistently formatted,
-e.g. "Brachystegia sp1" rather than a mix of "Brachystegia sp1" and
-"Brachystegia sp. 1".
-
 ### Alternative growth forms
+
+Palms, tree ferns, bamboos and other plants which are not dicot or conifer
+trees should be labelled in `growth_form`. INV_processing can assign an
+alternative allometry to these stems with `agb_allometry`, e.g.
+"goodman2013" for palms, or exclude them from AGB density with
+`growth_form_exclude`.
 
 ```{r}
 #| echo: false
@@ -1322,7 +1263,7 @@ displayHelp(flagFormAlt)
 
 ```{r}
 df_flagFormAlt <- flagFormAlt(
-  x = sf,
+  x = s_focal,
   meas_id = id_meas,
   taxon_name = "taxon_name",
   family = NULL,  # Provide a family column if available, e.g. from `tx`
@@ -1330,37 +1271,29 @@ df_flagFormAlt <- flagFormAlt(
   comment = "Possible alternative growth form"
 )
 
-datatable(df_flagFormAlt)
+showFlags(df_flagFormAlt)
 ```
-
-Palms, tree ferns, bamboos and other plants which are not dicot or conifer
-trees should be labelled in `growth_form`. INV_processing can assign an
-alternative allometry to these stems with `agb_allometry`, e.g.
-"goodman2013" for palms, or exclude them from AGB density with
-`growth_form_exclude`.
 
 ### Taxonomic names of multi-stemmed trees
 
-```{r}
-#| echo: false
-displayHelp(flagMultiTaxon)
-```
+All stems of a tree should have the same taxonomic name. INV_processing uses
+the wood density of the largest stem of each tree:
 
 ```{r}
-df_flagMultiTaxon <- flagMultiTaxon(
-  x = sf,
-  ind_id = id_tree,
-  census_id = "census_id",
-  taxon_name = "taxon_name",
-  comment = "Multi-stemmed tree with multiple taxonomic names"
-)
+# Trees with stems with different taxonomic names
+tree_taxa <- aggregate(taxon_name ~ site_id + plot_id + tree_id, data = s_focal, 
+  FUN = function(i) { paste(unique(i), collapse = "; ") })
+df_treeMultiTaxon <- tree_taxa[grepl("; ", tree_taxa$taxon_name), ]
 
-datatable(df_flagMultiTaxon)
+showFlags(df_treeMultiTaxon)
 ```
-
-INV_processing uses the wood density of the largest stem of each tree.
 
 ### Check taxonomic names against the World Flora Online database
+
+INV_processing matches taxonomic names to the World Flora Online database with
+`BIOMASS::correctTaxo()`. Check names which are changed or not matched below,
+and correct them in the stem measurement table if necessary. Matching needs an
+internet connection:
 
 ```{r}
 #| echo: false
@@ -1369,10 +1302,11 @@ displayHelp(correctTaxo, pkg = "BIOMASS")
 
 ```{r}
 # The World Flora Online API is occasionally unavailable. If so, the rest of
-# the notebook still runs, and this chunk can be run again later
-df_correctTaxo <- tryCatch(
+# the notebook still runs, and this chunk can be run again later.
+# `suppressMessages()` hides the progress bar
+df_correctTaxo <- tryCatch(suppressMessages(
   BIOMASS::correctTaxo(
-    unique(sf$taxon_name),
+    unique(s_focal$taxon_name),
     interactive = FALSE,
     preferAccepted = TRUE,
     preferFuzzy = TRUE,
@@ -1381,14 +1315,14 @@ df_correctTaxo <- tryCatch(
     useAPI = TRUE,
     capacity = 60,
     fill_time_s = 60,
-    timeout = 10),
+    timeout = 10)),
   error = function(e) {
-    message("Taxonomic name matching failed: ", conditionMessage(e))
+    cat("Taxonomic name matching failed:", conditionMessage(e), "\n")
     NULL
   })
 
 if (!is.null(df_correctTaxo)) {
-  datatable(unique(df_correctTaxo[df_correctTaxo$nameModified == TRUE,]))
+  showFlags(unique(df_correctTaxo[df_correctTaxo$nameModified == TRUE,]))
 }
 ```
 
@@ -1412,12 +1346,13 @@ wd_est <- BIOMASS::getWoodDensity(
 s$wd_gcm3 <- wd_est$meanWD
 s$wd_level <- ifelse(wd_est$levelWD %in% c("species", "genus", "family"), 
   wd_est$levelWD, "plot mean")
-sf <- s[s$focal, ]
 ```
 
+Plot the percentage of live basal area at each wood density level in each
+plot:
+
 ```{r}
-# Percentage of live basal area at each wood density level, per plot
-s_wd <- sf[sf$alive %in% TRUE & !is.na(sf$diam_cm), ]
+s_wd <- s[s$focal & grepl("A", s$code) & !is.na(s$diam_cm), ]
 
 ggplot(s_wd, aes(x = plot_id, weight = diam_cm^2, 
   fill = factor(wd_level, levels = c("species", "genus", "family", "plot mean")))) + 
@@ -1433,21 +1368,21 @@ INV_processing for taxa without local measurements:
 
 ```{r}
 #| eval: false
-df_flagValRange_wd <- flagValRange(
-  x = wd,
-  meas_id = "taxon_name",
-  target = "wood_density_gcm3",
-  threshold = c(0.08, 1.39),
-  min_n = 1,
-  comment = "Wood density outside global range"
-)
+# Wood density outside the range of the Global Wood Density Database (g cm-3)
+df_wdRange <- wd[wd$wood_density_gcm3 < 0.08 | wd$wood_density_gcm3 > 1.39, ]
 
-datatable(df_flagValRange_wd)
+showFlags(df_wdRange)
 ```
 
 ## Preview of AGB estimates
 
 ### Stems used to estimate AGB
+
+Preview which stem measurements INV_processing will exclude from AGB
+estimates and AGB density, and why. Check that stems are excluded for the
+right reasons. For example, live standing stems which are excluded because
+they have no code, or many stems excluded as "not standing", may indicate
+errors in the `code` column.
 
 ```{r}
 #| echo: false
@@ -1456,30 +1391,37 @@ displayHelp(flagAgbExclude)
 
 ```{r}
 df_flagAgbExclude <- flagAgbExclude(
-  x = sf,
+  x = s_focal,
   meas_id = id_meas,
+  plot_id = id_plot,
+  tree_id = "tree_id",
+  stem_id = "stem_id",
+  diam = "diam_cm",
+  code = "code",
+  pom = "pom_m",
+  date = "measurement_date",
   plot = p,
-  missing_diam = TRUE,  # `missing_diam_method: "impute"` in INV_processing
-  include_broken = TRUE,  # `include_broken` in INV_processing
-  agbd_diam_min_cm = 0,  # `agbd_diam_min_cm` in INV_processing
+  plot_diam_min = "meas_diam_min_cm",
+  growth_form = "growth_form",
+  missing_diam = inv_missing_diam_impute,
+  include_broken = inv_include_broken,
+  agbd_diam_min_cm = inv_agbd_diam_min_cm,
+  growth_form_exclude = inv_growth_form_exclude,
   comment = "Stem excluded from AGB estimates"
 )
 
-datatable(df_flagAgbExclude)
+showFlags(df_flagAgbExclude)
 ```
 
+Plot the number of stem records excluded for each reason in each plot:
+
 ```{r}
-# Number of stem records excluded for each reason, per plot
 ggplot(df_flagAgbExclude, aes(x = plot_id, fill = reason)) + 
   geom_bar() + 
   labs(x = "Plot", y = "Number of stem records", fill = NULL) + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1), 
     legend.position = "bottom", legend.direction = "vertical")
 ```
-
-Check that stems are excluded for the right reasons. For example, live
-standing stems which are excluded because they have no code, or many stems
-excluded as "not standing", may indicate errors in the `code` column.
 
 ### Approximate AGB
 
@@ -1490,8 +1432,11 @@ estimated above, and the location of each plot, as with `height_method:
 INV_processing combines the stems of multi-stemmed trees, propagates
 uncertainty, and may use different height and wood density methods.
 
+Calculate the longitude and latitude of the centre of each plot from its
+corners. The Chave et al. (2014) allometry uses plot location to account for
+regional differences in tree height:
+
 ```{r}
-# Longitude and latitude of the centre of each plot, from the plot corners
 pt_cent <- aggregate(
   cbind(x = rover_easting_utm_m, y = rover_northing_utm_m) ~ plot_id + crs_epsg, 
   data = pt, FUN = mean)
@@ -1508,9 +1453,11 @@ ggplot(plot_ll, aes(x = longitude, y = latitude, label = plot_id)) +
   labs(x = "Longitude", y = "Latitude")
 ```
 
+Estimate the AGB of live, standing stems with a diameter, in all censuses.
+These estimates are also used in [Part II](#part-ii-multi-census-checks-of-the-focal-census):
+
 ```{r}
-# Estimate AGB for stems in all censuses, used below
-s$agb_inc <- s$alive %in% TRUE & grepl("S", s$code) & 
+s$agb_inc <- grepl("A", s$code) & grepl("S", s$code) & 
   !grepl("[TM]", s$code) & !is.na(s$diam_cm)
 coord <- as.matrix(plot_ll[match(s$plot_id, plot_ll$plot_id), 
   c("longitude", "latitude")])
@@ -1520,23 +1467,28 @@ s$agb_Mg[s$agb_inc] <- BIOMASS::computeAGB(
   WD = s$wd_gcm3[s$agb_inc], 
   coord = coord[s$agb_inc, , drop = FALSE])
 s$ba_m2 <- pi * (s$diam_cm / 200)^2
-sf <- s[s$focal, ]
+s_focal <- s[s$focal, ]
 ```
 
+Plot stem AGB against diameter. Points far from the main cloud may be errors
+in diameter or wood density:
+
 ```{r}
-# Stem AGB against diameter. Points far from the main cloud may be errors in
-# diameter or wood density
-ggplot(sf[sf$agb_inc, ], aes(x = diam_cm, y = agb_Mg, colour = wd_level)) + 
+#| warning: false
+ggplot(s_focal[s_focal$agb_inc, ], aes(x = diam_cm, y = agb_Mg, colour = wd_level)) + 
   geom_point(alpha = 0.5) + 
   scale_x_log10() + 
   scale_y_log10() + 
   labs(x = "Stem diameter (cm)", y = "Stem AGB (Mg)", colour = "Wood density level")
 ```
 
+Plot the share of plot AGB in each 10 cm diameter class. Plots where a few
+large stems hold most of the AGB are most sensitive to errors in the
+measurements of those stems:
+
 ```{r}
 #| fig-height: 8
-# Share of plot AGB in each 10 cm diameter class
-sf_agb <- sf[sf$agb_inc, ]
+sf_agb <- s_focal[s_focal$agb_inc, ]
 sf_agb$diam_class <- cut(sf_agb$diam_cm, breaks = seq(0, 10 * ceiling(max(sf_agb$diam_cm) / 10), 10))
 
 ggplot(sf_agb, aes(x = diam_class, weight = agb_Mg)) + 
@@ -1547,11 +1499,15 @@ ggplot(sf_agb, aes(x = diam_class, weight = agb_Mg)) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
 ```
 
+Calculate the approximate AGB density of each plot, using the plot
+dimensions in the plot meta-data table. Check that AGB density is plausible
+for the vegetation type of each plot:
+
 ```{r}
-# Approximate AGB density of each plot
-agbd <- aggregate(list(agb_Mg = sf$agb_Mg), by = list(plot_id = sf$plot_id), 
+agbd <- aggregate(list(agb_Mg = s_focal$agb_Mg), by = list(plot_id = s_focal$plot_id), 
   FUN = sum, na.rm = TRUE)
-agbd <- merge(agbd, plot_area[, c("plot_id", "area_ha")])
+agbd$area_ha <- with(p[match(agbd$plot_id, p$plot_id), ],
+  plot_length_m * plot_width_m / 10000)
 agbd$agbd_Mg_ha <- agbd$agb_Mg / agbd$area_ha
 
 datatable(agbd)
@@ -1562,46 +1518,61 @@ ggplot(agbd, aes(x = reorder(plot_id, agbd_Mg_ha), y = agbd_Mg_ha)) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-Check that AGB density is plausible for the vegetation type of each plot.
-
-## Miscellaneous checks
-
-### Too many stems on multi-stemmed tree
-
-```{r}
-#| echo: false
-displayHelp(flagMultiMany)
-```
-
-```{r}
-df_flagMultiMany <- flagMultiMany(
-  x = sf,
-  ind_id = id_tree,
-  census_id = "census_id",
-  threshold = 12,
-  comment = "Tree with too many stems"
-)
-
-datatable(df_flagMultiMany)
-```
-
 # Part II: Multi-census checks of the focal census
 
 __This part of the notebook should only be used if you have access to
 multi-census data.__
 
 The checks in this part are run on data from all censuses, `s`, and can find
-issues in any census. `filterFocal()` then keeps only the issues which affect
-stems or measurements in the focal census, `sf`. Issues in other censuses are 
-kept in objects ending `_all`, which you may wish to inspect, but they do not
-need to be fixed for INV_processing.
+issues in any census. The results are then merged with the IDs of stems or
+measurements in the focal census, `s_focal`, e.g. `merge(df_all, unique(s_focal[, 
+id_stem]))`, to keep only the issues which affect the focal census. Issues in
+all censuses are kept in objects ending `_all`, which you may wish to inspect,
+but they do not need to be fixed for INV_processing.
+
+Several functions in this part need the mortality status of each stem
+measurement as a logical column. Stems with "D" in `code` are dead, stems
+with "A" are alive, and stems with neither are `NA`, i.e. status unknown:
 
 ```{r}
-#| echo: false
-displayHelp(filterFocal)
+s$alive <- NA
+s$alive[grepl("A", s$code)] <- TRUE
+s$alive[grepl("D", s$code)] <- FALSE
+```
+
+## Data overview
+
+Plot the number of stem records in each plot census. Large differences in the
+number of records among censuses of the same plot may indicate that part of a
+plot was not measured, or that records are missing from the data:
+
+```{r}
+#| fig-height: 6
+ggplot(s, aes(x = plot_id, fill = factor(census_id))) + 
+  geom_bar(position = "dodge", aes(colour = focal)) + 
+  scale_colour_manual(values = c("TRUE" = "black", "FALSE" = NA), guide = "none") + 
+  labs(x = "Plot", y = "Number of stem records", fill = "Census") + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Plot the composition of stem codes in each plot census. A sudden change in
+the focal census may indicate a change in field protocol or data entry errors:
+
+```{r}
+#| fig-height: 8
+ggplot(s, aes(x = factor(census_id), fill = code)) + 
+  geom_bar(position = "fill") + 
+  scale_y_continuous(labels = scales::percent) + 
+  facet_wrap(~plot_id) + 
+  labs(x = "Census", y = "Percentage of stem records", fill = "Code")
 ```
 
 ## Stems missing from the focal census
+
+Stems which were alive in a previous census should be recorded in the focal
+census, either with a new measurement, as dead, or as missing ("M"). Stems
+with no record in the focal census may have been missed in the field or lost
+during data entry.
 
 ```{r}
 #| echo: false
@@ -1619,13 +1590,12 @@ df_flagRecordAbsent <- flagRecordAbsent(
   comment = "Stem alive previously, absent from focal census"
 )
 
-datatable(df_flagRecordAbsent)
+showFlags(df_flagRecordAbsent)
 ```
 
-Stems which were alive in a previous census should be recorded in the focal
-census, either with a new measurement, as dead, or as missing ("M"). Stems
-with no record in the focal census may have been missed in the field or lost
-during data entry.
+`flagRecordMissing()` finds stems recorded before and after a census, but not
+in that census. Missing records should be added to the stem measurement
+table.
 
 ```{r}
 #| echo: false
@@ -1642,38 +1612,38 @@ df_flagRecordMissing_all <- flagRecordMissing(
   comment = "Missing stem measurement record"
 )
 
-df_flagRecordMissing <- filterFocal(df_flagRecordMissing_all, sf, 
-  c(id_plot, "census_id"))
+df_flagRecordMissing <- merge(df_flagRecordMissing_all, 
+  unique(s_focal[, c(id_plot, "census_id")]))
 
-datatable(df_flagRecordMissing)
+showFlags(df_flagRecordMissing)
 ```
-
-`flagRecordMissing()` finds stems recorded before and after a census, but not
-in that census. Missing records should be added to the stem measurement
-table.
 
 ## Stem IDs among censuses
 
+Stem IDs should be unique within a plot, so each stem should only ever belong
+to one tree, in every census:
+
 ```{r}
 # Stems which belong to more than one tree, in any census
-df_flagIdNest_stem_all <- flagIdNest(
-  x = s,
-  group_id = id_plot,
-  parent_id = "tree_id",
-  child_id = "stem_id",
-  comment = "Stem in more than one tree"
-)
+stem_tree <- aggregate(tree_id ~ site_id + plot_id + stem_id, data = s, 
+  FUN = function(i) { paste(unique(i), collapse = "; ") })
+df_stemMultiTree_all <- stem_tree[grepl("; ", stem_tree$tree_id), ]
 
-df_flagIdNest_stem <- filterFocal(df_flagIdNest_stem_all, sf, 
-  c(id_plot, "stem_id"))
+# Stems in the focal census
+df_stemMultiTree <- merge(df_stemMultiTree_all, unique(s_focal[, c(id_plot, "stem_id")]))
 
-datatable(df_flagIdNest_stem)
+showFlags(df_stemMultiTree)
 ```
 
-Stem IDs should be unique within a plot, so each stem should only ever belong
-to one tree, in every census.
-
 ## Plot-level change
+
+Compare the total basal area, number of live stems, and AGB of each plot to
+the previous census of the plot. Annual changes greater than
+`change_ann_max` are flagged.
+Large changes in plot totals may indicate that part of the plot was not
+measured, that stems were duplicated, that diameters are in the wrong units,
+or that a disturbance event occurred, which should be described in the plot
+meta-data table.
 
 ```{r}
 #| echo: false
@@ -1682,7 +1652,7 @@ displayHelp(flagPlotChange)
 
 ```{r}
 # Live standing stems
-live <- s$alive %in% TRUE & !grepl("[FM]", s$code)
+live <- grepl("A", s$code) & !grepl("[FM]", s$code)
 
 df_flagPlotChange_ba_all <- flagPlotChange(
   x = s,
@@ -1691,7 +1661,7 @@ df_flagPlotChange_ba_all <- flagPlotChange(
   census_date = "census_date",
   target = "ba_m2",
   cond = live,
-  threshold = 0.05,
+  threshold = change_ann_max,
   comment = "Large change in plot basal area"
 )
 
@@ -1702,7 +1672,7 @@ df_flagPlotChange_n_all <- flagPlotChange(
   census_date = "census_date",
   target = NULL,
   cond = live,
-  threshold = 0.05,
+  threshold = change_ann_max,
   comment = "Large change in plot stem density"
 )
 
@@ -1713,38 +1683,38 @@ df_flagPlotChange_agb_all <- flagPlotChange(
   census_date = "census_date",
   target = "agb_Mg",
   cond = s$agb_inc,
-  threshold = 0.05,
+  threshold = change_ann_max,
   comment = "Large change in plot AGB"
 )
 
-df_flagPlotChange <- filterFocal(rbind(
+# Changes since the previous census in the focal census
+df_flagPlotChange <- merge(rbind(
   df_flagPlotChange_ba_all, 
   df_flagPlotChange_n_all, 
-  df_flagPlotChange_agb_all), sf, c(id_plot, "census_id"))
+  df_flagPlotChange_agb_all), unique(s_focal[, c(id_plot, "census_id")]))
 
-datatable(df_flagPlotChange)
+showFlags(df_flagPlotChange)
 ```
+
+Plot the totals of each plot over time, with the focal census filled red:
 
 ```{r}
 #| fig-height: 8
-# Basal area, stem density and AGB density of each plot over time. Focal 
-# censuses are filled red
 plot_ts <- aggregate(
   list(
-    ba_m2 = ifelse(live, s$ba_m2, 0), 
-    n_stem = as.numeric(live), 
-    agb_Mg = ifelse(s$agb_inc, s$agb_Mg, 0)), 
+    ba_m2 = ifelse(live, s$ba_m2, 0),
+    n_stem = as.numeric(live),
+    agb_Mg = ifelse(s$agb_inc, s$agb_Mg, 0)),
   by = list(plot_id = s$plot_id, census_id = s$census_id, focal = s$focal,
-    census_date = decYear(s$census_date)), 
+    census_date = decYear(s$census_date)),
   FUN = sum, na.rm = TRUE)
-plot_ts <- merge(plot_ts, plot_area[, c("plot_id", "area_ha")])
 plot_ts_long <- rbind(
-  data.frame(plot_ts[, c("plot_id", "census_date", "focal")], 
-    metric = "Basal area (m2/ha)", value = plot_ts$ba_m2 / plot_ts$area_ha),
-  data.frame(plot_ts[, c("plot_id", "census_date", "focal")], 
-    metric = "Stem density (stems/ha)", value = plot_ts$n_stem / plot_ts$area_ha),
-  data.frame(plot_ts[, c("plot_id", "census_date", "focal")], 
-    metric = "AGB density (Mg/ha)", value = plot_ts$agb_Mg / plot_ts$area_ha))
+  data.frame(plot_ts[, c("plot_id", "census_date", "focal")],
+    metric = "Basal area (m2)", value = plot_ts$ba_m2),
+  data.frame(plot_ts[, c("plot_id", "census_date", "focal")],
+    metric = "Live stems", value = plot_ts$n_stem),
+  data.frame(plot_ts[, c("plot_id", "census_date", "focal")],
+    metric = "AGB (Mg)", value = plot_ts$agb_Mg))
 
 ggplot(plot_ts_long, aes(x = census_date, y = value, group = plot_id)) + 
   geom_line(colour = "grey50") + 
@@ -1753,11 +1723,6 @@ ggplot(plot_ts_long, aes(x = census_date, y = value, group = plot_id)) +
   facet_wrap(~metric, scales = "free_y", ncol = 1) + 
   labs(x = "Census date", y = NULL, fill = "Focal census")
 ```
-
-Large changes in plot totals may indicate that part of the plot was not
-measured, that stems were duplicated, that diameters are in the wrong units,
-or that a disturbance event occurred, which should be described in the plot
-meta-data table.
 
 The same check within subplots can find subplots which were missed, or
 measured twice:
@@ -1770,19 +1735,22 @@ df_flagPlotChange_subplot_all <- flagPlotChange(
   census_date = "census_date",
   target = NULL,
   cond = live,
-  threshold = 0.1,
+  threshold = change_ann_max_subplot,
   comment = "Large change in subplot stem density"
 )
 
-df_flagPlotChange_subplot <- filterFocal(df_flagPlotChange_subplot_all, sf, 
-  c(id_plot, "subplot_id", "census_id"))
+df_flagPlotChange_subplot <- merge(df_flagPlotChange_subplot_all, 
+  unique(s_focal[, c(id_plot, "subplot_id", "census_id")]))
 
-datatable(df_flagPlotChange_subplot)
+showFlags(df_flagPlotChange_subplot)
 ```
+
+Plot the number of live stems in each subplot in each census. Subplots with
+far fewer or far more stems in the focal census than in other censuses may
+have been missed, or measured twice:
 
 ```{r}
 #| fig-height: 10
-# Number of live stems in each subplot in each census
 sub_n <- aggregate(list(n_stem = as.numeric(live)), 
   by = list(plot_id = s$plot_id, subplot_id = s$subplot_id, 
     census_id = s$census_id), FUN = sum)
@@ -1797,6 +1765,12 @@ ggplot(sub_n, aes(x = factor(census_id), y = factor(subplot_id), fill = n_stem))
 
 ## Mortality and recruitment
 
+Annual mortality and recruitment rates in old-growth forests are typically
+1-3%. Census intervals ending in the focal census with rates greater than
+`demog_rate_max` are flagged. High mortality may indicate stems which were missed or retagged.
+High recruitment may indicate stems which were missed in the previous census,
+a change in the minimum diameter threshold, or retagged stems.
+
 ```{r}
 #| echo: false
 displayHelp(flagDemogRate)
@@ -1810,25 +1784,26 @@ df_flagDemogRate_all <- flagDemogRate(
   census_id = "census_id",
   census_date = "census_date",
   status = "alive",
-  threshold = 0.05,
+  threshold = demog_rate_max,
   comment = "High mortality or recruitment rate"
 )
 
 # Intervals ending in the focal census
 df_flagDemogRate <- df_flagDemogRate_all[
   paste(df_flagDemogRate_all$plot_id, df_flagDemogRate_all$census_t1) %in% 
-    paste(sf$plot_id, sf$census_id), ]
+    paste(s_focal$plot_id, s_focal$census_id), ]
 
-datatable(df_flagDemogRate)
+showFlags(df_flagDemogRate)
 ```
 
+Plot the mortality and recruitment rates of all census intervals, with
+intervals ending in the focal census filled red:
+
 ```{r}
-# Mortality and recruitment rates in all census intervals. Intervals ending 
-# in the focal census are filled red
-demog <- flagDemogRate(s, id_stem, id_plot, "census_id", "census_date", 
-  "alive", threshold = -Inf)
+demog <- suppressMessages(flagDemogRate(s, id_stem, id_plot, "census_id", 
+  "census_date", "alive", threshold = -Inf))
 demog$focal <- paste(demog$plot_id, demog$census_t1) %in% 
-  paste(sf$plot_id, sf$census_id)
+  paste(s_focal$plot_id, s_focal$census_id)
 demog_long <- rbind(
   data.frame(demog[, c("plot_id", "census_t1", "focal")], 
     rate = "Mortality", value = demog$mort_ann),
@@ -1837,18 +1812,20 @@ demog_long <- rbind(
 
 ggplot(demog_long, aes(x = plot_id, y = 100 * value)) + 
   geom_point(aes(fill = focal), shape = 21, size = 2.5) + 
-  geom_hline(yintercept = 5, linetype = 2) + 
+  geom_hline(yintercept = 100 * demog_rate_max, linetype = 2) + 
   scale_fill_manual(values = c("TRUE" = "red", "FALSE" = "white")) + 
   facet_wrap(~rate, ncol = 1) + 
   labs(x = "Plot", y = "Annual rate (%)", fill = "Ends in focal census") + 
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-High mortality may indicate stems which were missed or retagged. High
-recruitment may indicate stems which were missed in the previous census, a
-change in the minimum diameter threshold, or retagged stems.
-
 ### Retagged stems
+
+A stem which disappears between censuses, and a recruit with a similar
+diameter at almost the same location, may be the same stem with a new tag.
+Retagged stems inflate mortality and recruitment rates, and break diameter
+timelines, so that errors in the focal census cannot be found from previous
+censuses:
 
 ```{r}
 #| echo: false
@@ -1865,22 +1842,24 @@ df_flagTagChange_all <- flagTagChange(
   y_rel = "y_rel_m",
   diam = "diam_cm",
   status = "alive",
-  dist = 1,
-  diam_tol = 0.1,
+  threshold = tag_dist_max_m,
+  diam_tol = tag_diam_tol,
   comment = "Recruit may be a retagged stem"
 )
 
-df_flagTagChange <- filterFocal(df_flagTagChange_all, sf, c(id_stem, "census_id"))
+# Recruits in the focal census
+df_flagTagChange <- merge(df_flagTagChange_all, unique(s_focal[, c(id_stem, "census_id")]))
 
-datatable(df_flagTagChange)
+showFlags(df_flagTagChange)
 ```
 
 ## Diameter timeline
 
+Calculate the annual diameter growth of live stems between consecutive
+censuses, where the POM did not change:
+
 ```{r}
-# Annual diameter growth of live stems between consecutive censuses, with 
-# the same POM
-g <- s[s$alive %in% TRUE & !is.na(s$diam_cm), 
+g <- s[grepl("A", s$code) & !is.na(s$diam_cm), 
   c(id_stem, "census_id", "census_date", "diam_cm", "pom_m", "focal")]
 g$date <- decYear(g$census_date)
 g <- g[do.call(order, g[, c(id_stem, "date")]), ]
@@ -1893,19 +1872,41 @@ g$growth_cm_yr <- ifelse(same,
 g <- g[!is.na(g$growth_cm_yr), ]
 ```
 
+Plot growth against diameter in the previous census. The dashed lines show
+the growth thresholds used by `correctDiameterSeries()` below. Implausibly
+fast growth or shrinkage indicates an error in one of the two diameter
+measurements:
+
 ```{r}
 #| fig-height: 8
-# Growth against diameter in the previous census. The dashed lines show the 
-# growth thresholds used by `correctDiameterSeries()` below
 ggplot(g, aes(x = diam_prev, y = growth_cm_yr, colour = focal)) + 
   geom_point(alpha = 0.4) + 
-  geom_hline(yintercept = c(-2, 4), linetype = 2) + 
+  geom_hline(yintercept = c(growth_min_cm_yr, growth_max_cm_yr), linetype = 2) + 
   scale_colour_manual(values = c("TRUE" = "red", "FALSE" = "grey50")) + 
   facet_wrap(~plot_id) + 
   labs(x = "Diameter in previous census (cm)", 
     y = expression("Diameter growth (cm y"^-1*")"), 
     colour = "Ends in focal census")
 ```
+
+Stems with growth outside the thresholds between the previous census and the
+focal census are listed below. This includes stems with only two censuses,
+where `correctDiameterSeries()` cannot tell which of the two diameters is
+wrong:
+
+```{r}
+df_growthRange <- g[g$focal & 
+  (g$growth_cm_yr < growth_min_cm_yr | g$growth_cm_yr > growth_max_cm_yr), 
+  c(id_stem, "census_id", "diam_prev", "diam_cm", "growth_cm_yr")]
+
+showFlags(df_growthRange)
+```
+
+`correctDiameterSeries()` finds diameter measurements which are
+inconsistent with the rest of the diameter timeline of each stem, and
+suggests corrected values. Corrected diameters are suggestions. Check the
+field data sheets for each stem before changing diameters in the focal
+census.
 
 ```{r}
 #| echo: false
@@ -1921,7 +1922,7 @@ df_correctDiameterSeries_all <- correctDiameterSeries(
   diam = "diam_cm",
   status = "alive",
   pom = "pom_m",
-  growth_thresh = c(-2, 4),
+  growth_thresh = c(growth_min_cm_yr, growth_max_cm_yr),
   n_stem_thresh = 3, 
   digits = 1,
   method = c("shift", "pairwise"),
@@ -1929,15 +1930,17 @@ df_correctDiameterSeries_all <- correctDiameterSeries(
   comment = "Diameter timelines corrected"
 )
 
-df_correctDiameterSeries <- filterFocal(df_correctDiameterSeries_all, sf, 
-  c(id_stem, "census_date"))
+# Corrections to measurements in the focal census
+df_correctDiameterSeries <- merge(df_correctDiameterSeries_all, 
+  unique(s_focal[, c(id_stem, "census_date")]))
 
-datatable(df_correctDiameterSeries)
+showFlags(df_correctDiameterSeries)
 ```
 
+Plot the diameter timelines of the stems with the largest corrections in
+the focal census:
+
 ```{r}
-# Diameter timelines of the stems with the largest corrections in the focal
-# census
 cor_top <- df_correctDiameterSeries[
   order(-abs(df_correctDiameterSeries$diam_cor - df_correctDiameterSeries$diam_cm)), ]
 cor_top <- cor_top[!is.na(cor_top$diam_cm), ][seq_len(min(6, nrow(cor_top))), ]
@@ -1951,10 +1954,12 @@ if (nrow(cor_top) > 0) {
 }
 ```
 
-Corrected diameters are suggestions. Check the field data sheets for each
-stem before changing diameters in the focal census.
-
 ## Mortality timeline
+
+`correctMortalitySeries()` finds inconsistent mortality status timelines, e.g.
+a stem recorded as dead and then alive again, and missing mortality status,
+and suggests corrections. Check the field data sheets for each stem before
+changing codes in the focal census.
 
 ```{r}
 #| echo: false
@@ -1971,14 +1976,19 @@ df_correctMortalitySeries_all <- correctMortalitySeries(
   comment = "Mortality timelines corrected"
 )
 
-df_correctMortalitySeries <- filterFocal(
+# Corrections to measurements in the focal census
+df_correctMortalitySeries <- merge(
   df_correctMortalitySeries_all[!is.na(df_correctMortalitySeries_all$method), ], 
-  sf, c(id_stem, "census_id"))
+  unique(s_focal[, c(id_stem, "census_id")]))
 
-datatable(df_correctMortalitySeries)
+showFlags(df_correctMortalitySeries)
 ```
 
 ## Stem condition timeline
+
+Some changes in stem condition between censuses are impossible, e.g. a dead
+stem becoming alive, or a fallen stem standing again. Stems which are broken
+above or below the POM should remain broken in later censuses:
 
 ```{r}
 #| echo: false
@@ -2000,36 +2010,35 @@ df_flagCodeSeries_all <- flagCodeSeries(
   comment = "Invalid code transition"
 )
 
-df_flagCodeSeries <- filterFocal(df_flagCodeSeries_all, sf, id_stem)
+# Stems in the focal census
+df_flagCodeSeries <- merge(df_flagCodeSeries_all, unique(s_focal[, id_stem]))
 
-datatable(df_flagCodeSeries)
+showFlags(df_flagCodeSeries)
 ```
 
 ## Taxonomy timeline
 
-```{r}
-#| echo: false
-displayHelp(flagTaxonSeries)
-```
+A stem should normally have the same taxonomic name in every census. Where
+taxonomic names differ among censuses, the name in the focal census is not
+necessarily wrong, e.g. if a stem was re-identified by a specialist:
 
 ```{r}
-df_flagTaxonSeries_all <- flagTaxonSeries(
-  x = s,
-  ind_id = id_stem,
-  census_id = "census_id",
-  taxon_name = "taxon_name",
-  comment = "Taxon name differs among censuses"
-)
+# Stems with different taxonomic names in different censuses
+stem_taxa <- aggregate(taxon_name ~ site_id + plot_id + tree_id + stem_id, 
+  data = s, FUN = function(i) { paste(unique(i), collapse = "; ") })
+df_taxonSeries_all <- stem_taxa[grepl("; ", stem_taxa$taxon_name), ]
 
-df_flagTaxonSeries <- filterFocal(df_flagTaxonSeries_all, sf, id_stem)
+# Stems in the focal census
+df_taxonSeries <- merge(df_taxonSeries_all, unique(s_focal[, id_stem]))
 
-datatable(df_flagTaxonSeries)
+showFlags(df_taxonSeries)
 ```
-
-Where taxonomic names differ among censuses, the name in the focal census is
-not necessarily wrong, e.g. if a stem was re-identified by a specialist.
 
 ## Location timeline
+
+Stem coordinates should not change much between censuses. Stems which move by
+more than `loc_change_max_m` may have wrong coordinates in one census, which affects the
+quadrat they are assigned to in INV_processing:
 
 ```{r}
 #| echo: false
@@ -2043,16 +2052,22 @@ df_flagLocSeries_all <- flagLocSeries(
   x_rel = "x_rel_m",
   y_rel = "y_rel_m",
   census_id = "census_id",
-  dist_threshold = 2,
+  threshold = loc_change_max_m,
   comment = "Stem location differs among censuses"
 )
 
-df_flagLocSeries <- filterFocal(df_flagLocSeries_all, sf, id_stem)
+# Stems in the focal census
+df_flagLocSeries <- merge(df_flagLocSeries_all, unique(s_focal[, id_stem]))
 
-datatable(df_flagLocSeries)
+showFlags(df_flagLocSeries)
 ```
 
 ## Overgrown recruits
+
+Recruits are stems recorded for the first time. A recruit in the focal census
+which is much larger than it could have grown from the minimum diameter
+threshold since the previous census was probably missed in the previous
+census:
 
 ```{r}
 #| echo: false
@@ -2063,41 +2078,37 @@ displayHelp(flagRecruitBig)
 df_flagRecruitBig_all <- flagRecruitBig(
   x = s,
   ind_id = id_stem,
+  plot_id = id_plot,
   diam = "diam_cm",
   census_date = "census_date",
-  census_date_vec = NULL, 
-  plot_id = id_plot,  # Guess census dates separately for each plot
-  min_diam_threshold = 5,  # Minimum diameter threshold of the plot(s)
-  growth_max = 5,  # Maximum feasible annual diameter growth rate 
+  plot = p,
+  plot_diam_min = "meas_diam_min_cm",
+  growth_max = recruit_growth_max_cm_yr,
   comment = "Overgrown recruit"
 )
 
-df_flagRecruitBig <- filterFocal(df_flagRecruitBig_all, sf, 
-  c(id_stem, "census_date"))
+# Recruits in the focal census
+df_flagRecruitBig <- merge(df_flagRecruitBig_all, 
+  unique(s_focal[, c(id_stem, "census_date")]))
 
-datatable(df_flagRecruitBig)
+showFlags(df_flagRecruitBig)
 ```
 
 ## Pre-recorded recruits
 
-```{r}
-#| echo: false
-displayHelp(flagRecruitPre)
-```
+Stems whose first record has no diameter may have been back-filled in the
+data to censuses before they were recruited:
 
 ```{r}
-df_flagRecruitPre_all <- flagRecruitPre(
-  x = s,
-  ind_id = id_stem,
-  census_id = "census_id",
-  target = c("diam_cm"),
-  comment = "Pre-census recruit"
-)
+s_ord <- s[order(s$census_id), ]
+s_first <- s_ord[!duplicated(s_ord[, id_stem]), ]
+df_recruitPre_all <- s_first[is.na(s_first$diam_cm), 
+  c(id_stem, "census_id", "code", "diam_cm")]
 
-df_flagRecruitPre <- filterFocal(df_flagRecruitPre_all, sf, 
-  c(id_stem, "census_id"))
+# First records in the focal census
+df_recruitPre <- merge(df_recruitPre_all, unique(s_focal[, c(id_stem, "census_id")]))
 
-datatable(df_flagRecruitPre)
+showFlags(df_recruitPre)
 ```
 
 # Create output objects
@@ -2106,98 +2117,104 @@ Create a list of flag dataframes for the focal census and write to file:
 
 ```{r}
 flag_list <- list(
-  checkTableSpec_stem = df_checkTableSpec_stem,
-  checkTableSpec_plot = df_checkTableSpec_plot,
-  checkTableSpec_pt = df_checkTableSpec_pt,
-  flagTableMatch_stem_plot = df_flagTableMatch_stem_plot,
-  flagTableMatch_plot_pt = df_flagTableMatch_plot_pt,
-  flagPlotArea = df_flagPlotArea,
-  flagRecordDup = df_flagRecordDup,
-  flagStemDupLoc = df_flagStemDupLoc,
-  flagValMissing = df_flagValMissing,
-  flagValMissing_diam_cm = df_flagValMissing_diam_cm,
-  flagValMissing_pom_m = df_flagValMissing_pom_m,
-  flagValPresent_missing = df_flagValPresent_missing,
-  flagValPresent_broken = df_flagValPresent_broken,
-  flagDiamMin = df_flagDiamMin,
-  flagValOutlier_diam_cm = df_flagValOutlier_diam_cm,
-  flagBigStem = df_flagBigStem,
+  checkTableSpec_stem = df_checkTableSpec_stem[df_checkTableSpec_stem$severity == "error", ],
+  checkTableSpec_plot = df_checkTableSpec_plot[df_checkTableSpec_plot$severity == "error", ],
+  checkTableSpec_pt = df_checkTableSpec_pt[df_checkTableSpec_pt$severity == "error", ],
+  plotMissing = df_plotMissing,
+  ptMissing = df_ptMissing,
+  recordDup = df_recordDup,
+  valMissing = df_valMissing,
+  diamMissing = df_diamMissing,
+  pomMissing = df_pomMissing,
+  valPresentMissing = df_valPresentMissing,
+  diamBroken = df_diamBroken,
+  diamMin = df_diamMin,
+  diamRange = df_diamRange,
+  bigStem = df_bigStem,
   flagModOutlier_height_m_diam_cm = df_flagModOutlier_height_m_diam_cm,
-  flagValOutlier_height_m = df_flagValOutlier_height_m,
-  flagValUnit = df_flagValUnit,
-  flagValRound_diam_cm = df_flagValRound_diam_cm,
+  heightRange = df_heightRange,
+  valUnit = df_valUnit,
+  valRound = df_valRound,
   flagValDigit_diam_cm = df_flagValDigit_diam_cm,
   flagPomDefault = df_flagPomDefault,
   flagCodeVal = df_flagCodeVal,
   flagCodeVal_missing = df_flagCodeVal_missing,
+  codeIncomplete = df_codeIncomplete,
   flagMeasDate = df_flagMeasDate,
-  flagPlotCorner = df_flagPlotCorner,
   flagStemOutside = df_flagStemOutside,
   correctLocSub = df_correctLocSub,
-  flagTreeUnmapped = df_flagTreeUnmapped,
+  treeUnmapped = df_treeUnmapped,
   flagMultiLoc = df_flagMultiLoc,
-  flagIdNest_tree = df_flagIdNest_tree,
+  treeMultiSubplot = df_treeMultiSubplot,
   flagTaxonName = df_flagTaxonName,
   flagTaxonLevel = df_flagTaxonLevel,
   flagFormAlt = df_flagFormAlt,
-  flagMultiTaxon = df_flagMultiTaxon,
+  treeMultiTaxon = df_treeMultiTaxon,
   correctTaxo = df_correctTaxo,
   flagAgbExclude = df_flagAgbExclude,
-  flagMultiMany = df_flagMultiMany,
+  treeManyStems = df_treeManyStems,
   flagRecordAbsent = df_flagRecordAbsent,
   flagRecordMissing = df_flagRecordMissing,
-  flagIdNest_stem = df_flagIdNest_stem,
+  stemMultiTree = df_stemMultiTree,
   flagPlotChange = df_flagPlotChange,
   flagPlotChange_subplot = df_flagPlotChange_subplot,
   flagDemogRate = df_flagDemogRate,
   flagTagChange = df_flagTagChange,
+  growthRange = df_growthRange,
   correctDiameterSeries = df_correctDiameterSeries,
   correctMortalitySeries = df_correctMortalitySeries,
   flagCodeSeries = df_flagCodeSeries,
-  flagTaxonSeries = df_flagTaxonSeries,
+  taxonSeries = df_taxonSeries,
   flagLocSeries = df_flagLocSeries,
   flagRecruitBig = df_flagRecruitBig,
-  flagRecruitPre = df_flagRecruitPre
+  recruitPre = df_recruitPre
 )
 
 saveRDS(flag_list, "./flag_list.rds")
 ```
 
-Summarise the number of records flagged by each check:
-
-```{r}
-#| echo: false
-displayHelp(summariseFlags)
-```
+Summarise the number of records flagged by each check. Issues which stop
+INV_processing must be fixed before the focal census is submitted: errors in
+the format of the tables, plots missing from the plot meta-data or
+geo-location tables, duplicated records, missing IDs or codes, invalid codes,
+and measurements recorded on missing stems. Other issues should be reviewed,
+and fixed where they are errors:
 
 ```{r}
 #| fig-height: 10
-flag_summ <- summariseFlags(flag_list)
+must_fix <- c("checkTableSpec_stem", "checkTableSpec_plot", "checkTableSpec_pt",
+  "plotMissing", "ptMissing", "recordDup", "valMissing", "flagCodeVal",
+  "valPresentMissing")
 
-datatable(flag_summ)
+flag_summ <- data.frame(
+  check = names(flag_list),
+  n_flagged = sapply(flag_list, NROW))
+flag_summ$action <- ifelse(flag_summ$check %in% must_fix, "Must fix", "Review")
+flag_summ <- flag_summ[order(flag_summ$action, -flag_summ$n_flagged), ]
 
-ggplot(flag_summ[flag_summ$n_flagged > 0, ], 
-  aes(x = n_flagged, y = reorder(check, n_flagged))) + 
-  geom_col(fill = "grey", colour = "black") + 
-  scale_x_log10() + 
-  labs(x = "Number of rows flagged", y = NULL)
+datatable(flag_summ, rownames = FALSE)
+
+ggplot(flag_summ[flag_summ$n_flagged > 0, ],
+  aes(x = n_flagged, y = reorder(check, n_flagged), fill = action)) +
+  geom_col(colour = "black") +
+  scale_x_log10() +
+  scale_fill_manual(values = c("Must fix" = "red", "Review" = "grey")) +
+  labs(x = "Number of rows flagged", y = NULL, fill = NULL)
 ```
 
 Write the focal census stem measurement table to submit to INV_processing,
 with only the columns in the INV_processing specification, and check it
-again:
+again. There should be no "error" rows before the focal census is submitted:
 
 ```{r}
 stem_cols <- read.csv(
   "https://raw.githubusercontent.com/GEO-TREES/INV_processing/main/templates/stem_cols.csv", 
   fileEncoding = "UTF-8-BOM")
 
-s_out <- sf[, intersect(stem_cols$column_name, names(sf))]
+s_out <- s_focal[, intersect(stem_cols$column_name, names(s_focal))]
 
 df_checkTableSpec_out <- checkTableSpec(s_out, stem_cols)
-datatable(df_checkTableSpec_out)
+showFlags(df_checkTableSpec_out)
 
 write.csv(s_out, "./stem_focal.csv", row.names = FALSE)
 ```
-
-There should be no "error" rows above before the focal census is submitted.

@@ -6,10 +6,8 @@
 #' @param unique logical, if TRUE duplicated values are removed
 #' @param sort logical, if TRUE values are sorted
 #'
-#' @keywords Internal
+#' @keywords internal
 #' @noRd
-#' 
-#' @export
 #' 
 pasteVals <- function(..., sep = "", collapse = NULL, 
   remna = TRUE, unique = FALSE, sort = FALSE) {

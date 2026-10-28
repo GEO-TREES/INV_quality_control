@@ -5,14 +5,14 @@
 #' @param x_rel column name in `x` with relative X coordinates
 #' @param y_rel column name in `x` with relative Y coordinates
 #' @param census_id `r param_census_id()`
-#' @param dist_threshold numeric maximum allowable distance between stems between censuses.
+#' @param threshold numeric maximum allowable distance between stems between censuses.
 #' @param comment `r param_comment()`
 #' 
 #' @details
 #' This function calculates the pairwise Euclidean distance between all records for each stem associated with a single `ind_id`. If any distance exceeds the `threshold`, the `ind_id` is flagged.
 #'
 #' @return dataframe with values of `ind_id` where maximum distance moved
-#' exceeds `dist_threshold`, along with the calculated `max_dist`
+#' exceeds `threshold`, along with the calculated `max_dist`
 #' 
 #' @examples
 #' df <- data.frame(
@@ -23,11 +23,11 @@
 #' )
 #' 
 #' # Flag stems that moved more than 2 units
-#' flagLocSeries(df, ind_id = "id", x_rel = "gx", y_rel = "gy", census_id = "census", dist_threshold = 2)
+#' flagLocSeries(df, ind_id = "id", x_rel = "gx", y_rel = "gy", census_id = "census", threshold = 2)
 #' 
 #' @export
 #' 
-flagLocSeries <- function(x, ind_id, x_rel, y_rel, census_id, dist_threshold, comment = NULL) { 
+flagLocSeries <- function(x, ind_id, x_rel, y_rel, census_id, threshold, comment = NULL) { 
 
   # Check columns exist
   columnCatch(x, ind_id, census_id, x_rel, y_rel)
@@ -50,7 +50,7 @@ flagLocSeries <- function(x, ind_id, x_rel, y_rel, census_id, dist_threshold, co
   out$max_dist <- unname(max_dists)
 
   # Filter based on user-defined threshold
-  out_fil <- out[out$max_dist > dist_threshold, ]
+  out_fil <- out[out$max_dist > threshold, ]
   rownames(out_fil) <- NULL
 
   # Generate comment
@@ -60,7 +60,7 @@ flagLocSeries <- function(x, ind_id, x_rel, y_rel, census_id, dist_threshold, co
 
   # Generate message
   if (nrow(out_fil) > 0) {
-    message(paste("Location changes exceeded distance threshold (", dist_threshold, ") among censuses", sep = ""))
+    message(paste("Location changes exceeded distance threshold (", threshold, ") among censuses", sep = ""))
   }
   
   # Return

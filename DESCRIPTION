@@ -25,4 +25,5 @@ Suggests:
 	BIOMASS,
 	DT,
 	scales,
-	sf
+	sf,
+	tibble

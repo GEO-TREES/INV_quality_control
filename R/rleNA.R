@@ -4,7 +4,7 @@
 #'
 #' @return object of class "rle"
 #' 
-#' @keywords Internal
+#' @keywords internal
 #' @noRd
 #' 
 rleNA <- function (x)  {
