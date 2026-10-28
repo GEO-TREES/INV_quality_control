@@ -15,7 +15,7 @@
 #'   sp = c("Quercus alba", "Quercus rubra", "Acer rubrum", "Acer rubrum")
 #' )
 #' 
-#' flagMultiTaxon(df, "tree_id", "year", "sp")
+#' flagMultiTaxon(df, "tree_id", "sp", "year")
 #' 
 #' @export
 flagMultiTaxon <- function(x, ind_id, taxon_name, census_id = NULL, comment = NULL) {
@@ -30,10 +30,15 @@ flagMultiTaxon <- function(x, ind_id, taxon_name, census_id = NULL, comment = NU
   out <- do.call(rbind, lapply(x_split, function(y) {
     if (length(unique(y[[taxon_name]])) > 1) {
       df <- unique(y[,c(ind_id, census_id), drop = FALSE])
-      df$taxon_name <- paste(y[[taxon_name]], collapse = ";")
+      df[[taxon_name]] <- paste(unique(y[[taxon_name]]), collapse = ";")
       df
     }
   }))
+
+  # Handle case where no trees are flagged
+  if (is.null(out)) {
+    out <- x[0, c(ind_id, census_id, taxon_name), drop = FALSE]
+  }
   row.names(out) <- NULL
 
   # Generate comment
@@ -42,7 +47,7 @@ flagMultiTaxon <- function(x, ind_id, taxon_name, census_id = NULL, comment = NU
   } 
 
   # Generate message
-  if (nrow(out) < 0) {
+  if (nrow(out) > 0) {
     message("Multi-stemmed individuals with multiple taxonomic names detected")
   }
   

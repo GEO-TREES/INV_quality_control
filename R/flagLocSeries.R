@@ -5,7 +5,7 @@
 #' @param x_rel column name in `x` with relative X coordinates
 #' @param y_rel column name in `x` with relative Y coordinates
 #' @param census_id `r param_census_id()`
-#' @param threshold numeric maximum allowable distance between stems between censuses.
+#' @param dist_threshold numeric maximum allowable distance between stems between censuses.
 #' @param comment `r param_comment()`
 #' 
 #' @details
@@ -36,7 +36,8 @@ flagLocSeries <- function(x, ind_id, x_rel, y_rel, census_id, dist_threshold, co
   x_coords <- x[!is.na(x[[x_rel]]) & !is.na(x[[y_rel]]), ]
 
   # Calculate maximum pairwise distance for each individual
-  max_dists <- sapply(split(x_coords[, c(x_rel, y_rel)], x_coords[[ind_id]]), function(coords) {
+  ind_key <- do.call(paste, c(x_coords[, ind_id, drop = FALSE], sep = "::"))
+  max_dists <- sapply(split(x_coords[, c(x_rel, y_rel)], ind_key), function(coords) {
     if (nrow(coords) < 2) {
       return(0)
     }
@@ -45,12 +46,8 @@ flagLocSeries <- function(x, ind_id, x_rel, y_rel, census_id, dist_threshold, co
   })
 
   # Create output dataframe
-  out <- data.frame(
-    id = names(max_dists), 
-    max_dist = unname(max_dists), 
-    stringsAsFactors = FALSE
-  )
-  names(out)[1] <- ind_id # Match the user-provided ID column name
+  out <- x_coords[match(names(max_dists), ind_key), ind_id, drop = FALSE]
+  out$max_dist <- unname(max_dists)
 
   # Filter based on user-defined threshold
   out_fil <- out[out$max_dist > dist_threshold, ]

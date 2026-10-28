@@ -1,7 +1,7 @@
 #' Flag trees with stems spread across multiple locations
 #'
 #' @param x `r param_x_stem()`
-#' @param ind_id `r param_id("individual trees")
+#' @param ind_id `r param_id("individual trees")`
 #' @param x_rel column name in `x` with relative X coordinates
 #' @param y_rel column name in `x` with relative Y coordinates
 #' @param threshold numeric maximum allowable distance between any two stems 
@@ -23,7 +23,7 @@
 #'   gy = c(0, 0.2, 10, 30)
 #' )
 #' 
-#' flagMultiLoc(df, "tree_id", c("gx", "gy"), threshold = 5)
+#' flagMultiLoc(df, "tree_id", "gx", "gy", threshold = 5)
 #' 
 #' @export
 flagMultiLoc <- function(x, ind_id, x_rel, y_rel, threshold, census_id = NULL, comment = NULL) {
@@ -56,6 +56,12 @@ flagMultiLoc <- function(x, ind_id, x_rel, y_rel, threshold, census_id = NULL, c
   })
 
   out <- do.call(rbind, is_too_spread)
+
+  # Handle case where no trees are flagged
+  if (is.null(out)) {
+    out <- x[0, c(ind_id, census_id), drop = FALSE]
+    out$dist_mean <- numeric(0)
+  }
   rownames(out) <- NULL
 
   # Generate comment

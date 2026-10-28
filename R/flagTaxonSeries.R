@@ -14,8 +14,8 @@
 #'   census = c(1, 2, 1, 2, 1, 2),
 #'   sp = c("A", "B", "C", "C", "D", "D")
 #' )
-
-#' flagTaxonSeries(df, "sp", "id", "census")
+#' 
+#' flagTaxonSeries(df, "id", "sp", "census")
 #' 
 #' @export
 #' 
@@ -35,6 +35,7 @@ flagTaxonSeries <- function(x, ind_id, taxon_name, census_id, comment = NULL) {
 
   # Flatten the matrix column that aggregate() creates into normal columns
   out <- cbind(out[ind_id], as.data.frame(out[[taxon_name]]))
+  out$n_unique <- as.numeric(out$n_unique)
   out_fil <- out[out$n_unique > 1, c(ind_id, "taxon_name")]
   names(out_fil)[ncol(out_fil)] <- taxon_name
   rownames(out_fil) <- NULL

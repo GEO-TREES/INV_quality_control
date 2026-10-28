@@ -3,3 +3,5 @@ inst/*.html
 inst/*.ipynb
 inst/*_files/
 man/
+inst/flag_list.rds
+inst/stem_focal.csv

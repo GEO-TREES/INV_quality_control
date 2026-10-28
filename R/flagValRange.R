@@ -2,7 +2,7 @@
 #' 
 #' @param x `r param_x_stem()`
 #' @param meas_id `r param_id("individual measurements")`
-#' @param target `x param_target()`
+#' @param target `r param_target()`
 #' @param threshold optional, numeric vector of length 1 or 2. If a single value it is interpreted as an upper limit. If two values it is interpreted as a range of acceptable values in `target`
 #' @param min_n Minimum number of observations in `target` to perform the check
 #' @param comment `r param_comment()`

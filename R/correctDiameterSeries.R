@@ -24,7 +24,7 @@ buildPairs <- function(y, census_date, diam, status, pom) {
   t0 <- y[[census_date]][i0]
   tT <- y[[census_date]][iT]
   tdiff <- as.numeric(tT - t0)
-  growth_ann <- (dT - d0) * tdiff / 365.25
+  growth_ann <- (dT - d0) / (tdiff / 365.25)
   data.frame(
     census_t0 = t0,
     census_tT = tT,
@@ -78,68 +78,113 @@ findBadCensuses <- function(p) {
 #' @param plot_id `r param_plot_id()`
 #' @param census_date `r param_census_date()`
 #' @param diam `r param_diam()`
+#' @param pom `r param_pom()`. Increments spanning a POM change are not 
+#'     treated as shifts
 #' @param growth_thresh numeric vector of length 2 (min, max acceptable growth)
 #' @param digits number of decimal places for rounding
+#' @param anchor which segment of the trajectory is assumed correct: 
+#'     "longest", "last" or "first"
 #' 
 #' @return data.frame of rows with corrected diameters, or NULL if no shift
 #' 
 #' @keywords internal
 #' @noRd
 #' 
-imputeShift <- function(y, ind_id, plot_id, census_date, diam, growth_thresh, digits) {
+imputeShift <- function(y, ind_id, plot_id, census_date, diam, pom, 
+  growth_thresh, digits, anchor = "longest") {
+
+  # Only measurements with a diameter
+  idx <- which(!is.na(y[[diam]]))
 
   # Need at least 3 points to confirm a shift (before, jump, after)
-  n <- nrow(y)
-  if (n < 3) {
+  if (length(idx) < 3) {
     return(NULL) 
   }
-  
-  # Calculate sequential increments
-  t_diff <- as.numeric(diff(y[[census_date]])) / 365.25
-  d_diff <- diff(y[[diam]])
-  growth_seq <- d_diff / t_diff
-  
-  # Flag abnormal sequential growth
-  is_abnormal <- !is.na(growth_seq) & 
-    (growth_seq < growth_thresh[1] | 
-      growth_seq > growth_thresh[2])
-  
-  corrected_indices <- c()
-  diam_cor <- y[[diam]]
-  cumulative_shift <- 0
-  
-  # Loop through sequential increments to find shift topologies
-  for (i in 1:(n - 1)) {
-    # A shift is defined as: An abnormal jump...
-    if (is_abnormal[i]) {
-      # ...followed by a normal increment (meaning the series stabilized at a new, wrong baseline)
-      if (i < (n - 1) && !is_abnormal[i + 1]) {
-        
-        # Calculate the magnitude of the false jump. 
-        # We conservatively assume the 'true' growth during the jump period was 0
-        shift_magnitude <- d_diff[i] 
-        cumulative_shift <- cumulative_shift + shift_magnitude
-        
-        # Apply the correction to THIS measurement and ALL subsequent measurements
-        # (This is handled by accumulating the shift)
-      }
-    }
-    
-    # If a shift has occurred historically, apply the cumulative realignment
-    if (cumulative_shift != 0) {
-      target_idx <- i + 1
-      diam_cor[target_idx] <- y[[diam]][target_idx] - cumulative_shift
-      corrected_indices <- c(corrected_indices, target_idx)
-    }
+
+  t <- as.numeric(y[[census_date]][idx]) / 365.25
+  d <- y[[diam]][idx]
+  p <- y[[pom]][idx]
+
+  # Flag abnormal sequential growth, excluding increments with a POM change
+  abnormalInc <- function(t, d, p) {
+    g <- diff(d) / diff(t)
+    pom_change <- diff(p) != 0
+    pom_change[is.na(pom_change)] <- FALSE
+    list(
+      abnormal = !is.na(g) & !pom_change & 
+        (g < growth_thresh[1] | g > growth_thresh[2]),
+      normal = !is.na(g) & !pom_change & 
+        g >= growth_thresh[1] & g <= growth_thresh[2],
+      growth = g)
   }
-  
-  if (length(corrected_indices) == 0) return(NULL)
-  
+  inc <- abnormalInc(t, d, p)
+
+  # Remove punctual errors, i.e. a measurement between two abnormal 
+  # increments in opposite directions. These are corrected by pairwise 
+  # imputation instead
+  d_diff <- diff(d)
+  n_inc <- length(d_diff)
+  spike <- c(FALSE, inc$abnormal[-n_inc] & inc$abnormal[-1] & 
+    sign(d_diff[-n_inc]) != sign(d_diff[-1]), FALSE)
+  idx <- idx[!spike]
+  t <- t[!spike]
+  d <- d[!spike]
+  p <- p[!spike]
+
+  if (length(idx) < 3) {
+    return(NULL) 
+  }
+
+  inc <- abnormalInc(t, d, p)
+
+  if (!any(inc$abnormal)) {
+    return(NULL)
+  }
+
+  # Split trajectory into segments of consistent measurements, separated by
+  # abnormal increments
+  seg <- c(1, 1 + cumsum(inc$abnormal))
+  seg_n <- tabulate(seg)
+
+  # Choose the segment assumed to be correct. Ties between the longest 
+  # segments are broken in favour of the latest segment
+  if (anchor == "longest") {
+    seg_long <- which(seg_n == max(seg_n))
+    anchor_seg <- seg_long[length(seg_long)]
+    # A single measurement is not enough evidence to realign the others
+    if (seg_n[anchor_seg] < 2) {
+      return(NULL)
+    }
+  } else if (anchor == "last") {
+    anchor_seg <- max(seg)
+  } else {
+    anchor_seg <- 1
+  }
+
+  # Growth during an abnormal jump is assumed to equal the median growth of 
+  # the normal increments of the stem, or zero if there are none
+  rate <- stats::median(inc$growth[inc$normal])
+  if (is.na(rate)) {
+    rate <- 0
+  }
+
+  # Cumulative false jump relative to the anchor segment
+  excess <- ifelse(inc$abnormal, diff(d) - rate * diff(t), 0)
+  cum_excess <- c(0, cumsum(excess))
+  shift <- cum_excess - cum_excess[seg == anchor_seg][1]
+
+  diam_cor <- d - shift
+  cor_i <- which(shift != 0)
+
+  if (length(cor_i) == 0 || any(diam_cor[cor_i] <= 0)) {
+    return(NULL)
+  }
+
   # Format output to match imputePairwise columns exactly so rbind() works
   keep_cols <- unique(c(ind_id, plot_id, census_date, diam, ".stem_key"))
-  out_rows <- y[unique(corrected_indices), keep_cols, drop = FALSE]
+  out_rows <- y[idx[cor_i], keep_cols, drop = FALSE]
   
-  out_rows$diam_cor <- round(diam_cor[unique(corrected_indices)], digits = digits)
+  out_rows$diam_cor <- round(diam_cor[cor_i], digits = digits)
   out_rows$correction_method <- "shift realignment"
   
   return(out_rows)
@@ -158,11 +203,13 @@ imputePairwise <- function(x_multi, x_split, ind_id, plot_id, census_date, diam,
     p$.stem_key <- y$.stem_key[1L]
     p$.group_key <- y$.group_key[1L]
     p$pom_change <- p$pom_t0 != p$pom_tT
+    p$pom_change[is.na(p$pom_change)] <- FALSE
     p$bad_meas <- (
       (!is.na(p$growth_ann) &
         (p$growth_ann > growth_thresh[2] | p$growth_ann < growth_thresh[1]) &
         !p$pom_change) |
-      is.na(p$diam_t0) | is.na(p$diam_tT)
+      (is.na(p$diam_t0) & p$status_t0 %in% TRUE) | 
+      (is.na(p$diam_tT) & p$status_tT %in% TRUE)
     )
     p
   })
@@ -188,7 +235,9 @@ imputePairwise <- function(x_multi, x_split, ind_id, plot_id, census_date, diam,
     }
   }))
 
-  missing_df <- x_multi[is.na(x_multi[[diam]]), c(".stem_key", census_date)]
+  # Only live stems should have a diameter imputed
+  missing_df <- x_multi[is.na(x_multi[[diam]]) & x_multi[[status]] %in% TRUE, 
+    c(".stem_key", census_date)]
   names(missing_df)[names(missing_df) == census_date] <- "bad_census"
 
   all_bad <- unique(rbind(bad_census_df, missing_df))
@@ -202,7 +251,7 @@ imputePairwise <- function(x_multi, x_split, ind_id, plot_id, census_date, diam,
   good_pairs <- pairs[
     !paste(pairs$.stem_key, pairs$census_t0) %in% bad_lookup &
       !paste(pairs$.stem_key, pairs$census_tT) %in% bad_lookup &
-      pairs$status_t0 == TRUE & pairs$status_tT == TRUE &
+      pairs$status_t0 %in% TRUE & pairs$status_tT %in% TRUE &
       !pairs$pom_change &
       !is.na(pairs$growth_ann),
   ]
@@ -311,24 +360,34 @@ imputePairwise <- function(x_multi, x_split, ind_id, plot_id, census_date, diam,
 #'   Options are `"shift"` and/or `"pairwise"`. Multiple methods can be supplied 
 #'   and will be executed sequentially. 
 #'   - `"shift"`: Identifies and realigns permanent shifts in a diameter trajectory 
-#'     (e.g., caused by a slipped tape or unrecorded change in point of measurement) 
-#'     by diagnosing abnormal jumps followed by normal growth. It realigns the 
-#'     trajectory without discarding valid subsequent measurements.
+#'     (e.g., caused by a slipped tape or unrecorded change in point of measurement).
+#'     The trajectory is split into segments of consistent measurements 
+#'     separated by abnormal increments, and all segments are realigned to 
+#'     the segment chosen by `shift_anchor`, assuming that growth during each
+#'     abnormal increment equals the median growth of the normal increments 
+#'     of the stem. Increments spanning a POM change are not treated as 
+#'     shifts. Isolated spikes or dips are left for `"pairwise"`.
 #'   - `"pairwise"`: Identifies punctual anomalous spikes or dips by evaluating 
 #'     growth across all pairwise census combinations for a stem. Flagged values 
 #'     are imputed using a mean annual growth rate derived from the stem's own 
 #'     history or the plot group mean.
 #'   Defaults to `c("shift", "pairwise")`, which optimally resolves permanent 
 #'   structural shifts first before smoothing any remaining localized spikes.
+#' @param shift_anchor which segment of a shifted trajectory is assumed to be 
+#'   correct, if `method` includes `"shift"`. `"longest"` uses the segment 
+#'   with the most measurements, i.e. the majority of the trajectory, with 
+#'   ties broken in favour of the latest segment, and does not correct stems
+#'   where every segment has only one measurement. `"last"` and `"first"` 
+#'   use the latest or earliest segment
 #' @param comment `r param_comment()`
 #'
 #' @details
 #' Error detection follows a greedy vote procedure. For each stem, all
 #' pairwise growth rates are computed. Pairs where growth exceeds the
-#' threshold (excluding POM changes) or where either measurement is missing
-#' are flagged. The census date appearing most frequently across bad pairs is
-#' removed iteratively until no bad pairs remain. Missing diameter values are
-#' also flagged unconditionally.
+#' threshold (excluding POM changes) or where either measurement of a live 
+#' stem is missing are flagged. The census date appearing most frequently across bad pairs is
+#' removed iteratively until no bad pairs remain. Missing diameter values of 
+#' live stems are also flagged. Dead stems are never given a diameter.
 #'
 #' Imputation projects forward and backward from every good anchor
 #' measurement using the mean rate, then averages across all projections. If
@@ -366,10 +425,12 @@ imputePairwise <- function(x_multi, x_split, ind_id, plot_id, census_date, diam,
 #'
 correctDiameterSeries <- function(x, ind_id, plot_id, census_date, diam, status,
   pom, growth_thresh  = 4, n_stem_thresh = 3L, digits = 1L, 
-  method = c("shift", "pairwise"), comment = NULL) {
+  method = c("shift", "pairwise"), shift_anchor = c("longest", "last", "first"), 
+  comment = NULL) {
 
   # Input checks -------------------------------------------------------------------
   method <- match.arg(method, several.ok = TRUE)
+  shift_anchor <- match.arg(shift_anchor)
   columnCatch(x, ind_id, plot_id, census_date, diam, status, pom)
   x[[diam]] <- classCatch(x[[diam]], "numeric")
   x$.date_fmt <- classCatch(x[[census_date]], "Date")
@@ -410,7 +471,8 @@ correctDiameterSeries <- function(x, ind_id, plot_id, census_date, diam, status,
   # --------------------------------------------------------------------------------
   if ("shift" %in% method) {
     out_shift <- do.call(rbind, lapply(x_split, function(y) {
-      imputeShift(y, ind_id, plot_id, ".date_fmt", diam, growth_thresh, digits)
+      imputeShift(y, ind_id, plot_id, ".date_fmt", diam, pom, growth_thresh, 
+        digits, shift_anchor)
     }))
     
     if (!is.null(out_shift) && nrow(out_shift) > 0L) {

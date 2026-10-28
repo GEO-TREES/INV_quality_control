@@ -1,0 +1,28 @@
+Package: treeInvQC
+Title: Quality control for tree inventory data in plots
+Version: 0.1
+Authors@R:
+	c(
+		person("John L.", "Godlee", , "johngodlee@gmail.com", role = c("aut", "cre")),
+		person("Vincyane", "Badouard", , "vincyane.badouard@gmail.com", role = c("aut"))
+	)
+Description: A general suite of tools for quality control of single- and
+	multi-census tree inventory data in plots. Includes a built-in Quarto notebook
+	which leverages the package functions to provide a reproducible QC workflow.
+License: `use_mit_license()`
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports:
+	ggplot2,
+	ggrepel,
+	htmltools,
+	knitr,
+	stats,
+	tools,
+	utils
+Suggests:
+	BIOMASS,
+	DT,
+	scales,
+	sf

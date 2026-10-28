@@ -37,7 +37,7 @@ param_census_id <- function(optional = FALSE) {
   } else {
     opt <- NULL
   }
-  paste0(opt, "column name in 'x' providing unique census IDs. Must be sortable alpha-numerically")
+  paste0(opt, "column name in 'x' providing census IDs. Must be integers which increase with each census of a plot")
 }
 
 param_census_id_vec <- function(optional = TRUE) {
@@ -101,4 +101,16 @@ param_cond <- function(optional = TRUE) {
 
 param_min_diam_threshold <- function() {
   "minimum diameter threshold for stem measurements in the plot(s)"
+}
+
+param_x_plot <- function() {
+  "dataframe containing plot meta-data, one row per plot"
+}
+
+param_x_pt <- function() {
+  "dataframe containing plot geo-location points, one row per point"
+}
+
+param_xy_rel <- function(axis, table = "x") {
+  paste0("column name in '", table, "' with relative ", axis, " coordinates")
 }

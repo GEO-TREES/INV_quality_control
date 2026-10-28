@@ -1,14 +1,15 @@
 #' Flag Potential Issues in Taxonomic Names
 #'
 #' @description
-#' Evaluates a data frame with taxonomic names and returns a character vector 
-#' of flags/comments for names that violate standard nomenclature. 
+#' Evaluates a data frame with taxonomic names and returns the rows with 
+#' names that violate standard nomenclature. 
 #'
 #' @details
 #' The function performs two checks:
 #' \itemize{
 #'   \item \strong{Suffix checks:} Validates that family names end in "-aceae" 
-#'   and ensures that genus or species names do not.
+#'   and ensures that genus or species names do not. The eight conserved 
+#'   alternative family names, e.g. "Leguminosae", "Palmae", are accepted.
 #'   \item \strong{Pattern matching:} Uses a regular expression to identify 
 #'   forbidden characters (e.g. punctuation or symbols) across all provided 
 #'   taxonomic name columns.
@@ -28,14 +29,14 @@
 #'
 #' @examples
 #' df <- data.frame(
+#'   id = 1:2,
 #'   fam = c("Asteraceae", "Poa"), 
 #'   gen = c("Abies", "Pinaceae"),
 #'   spec = c("alba", "sylvestris"),
 #'   full = c("Abies alba", "Pinaceae sylvestris")
 #' )
 #' 
-#' # Generate the flag vector
-#' df$flags <- flagTaxonName(df, taxon_name = "full", family = "fam", genus = "gen")
+#' flagTaxonName(df, "id", taxon_name = "full", family = "fam", genus = "gen")
 #'
 #' @export
 #'
@@ -58,7 +59,11 @@ flagTaxonName <- function(x, meas_id, taxon_name, family = NULL, genus = NULL,
 
   # Check for incongruous names in family column
   if (!is.null(family)) { 
-    out$family_aceae <- !grepl("aceae$", x[[family]]) & !is.na(x[[family]])
+    # Conserved alternative family names, ICN Art. 18.5
+    fam_alt <- c("Compositae", "Cruciferae", "Gramineae", "Guttiferae", 
+      "Labiatae", "Leguminosae", "Palmae", "Umbelliferae")
+    out$family_aceae <- !grepl("aceae$", x[[family]]) & 
+      !x[[family]] %in% fam_alt & !is.na(x[[family]])
   }
 
   # Check regex across all taxonomic names
@@ -74,7 +79,7 @@ flagTaxonName <- function(x, meas_id, taxon_name, family = NULL, genus = NULL,
 
   # Generate comment
   if (!is.null(comment) & nrow(out_fil) > 0) {
-    out$comment <- comment
+    out_fil$comment <- comment
   }
 
   # Generate message

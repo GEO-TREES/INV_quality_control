@@ -18,7 +18,9 @@
 #'   status = c("alive", "alive", "dead", "alive", "dead")
 #' )
 #' 
-#' flagValMissing(df, "dbh", df$status == "alive")
+#' df$id <- seq_len(nrow(df))
+#' 
+#' flagValMissing(df, "id", "dbh", cond = df$status == "alive")
 #' 
 #' @export
 #' 
@@ -62,10 +64,10 @@ flagValMissing <- function(x, meas_id, target, cond = NULL, comment = NULL) {
 
   # Convert list back to a matrix 
   miss_df <- as.data.frame(do.call(cbind, miss_list))
-  any_missing <- rowSums(miss_df) > 0
+  any_missing <- rowSums(miss_df) > 0 & in_scope
 
   # Add meas_id columns
-  miss_df_meas <- cbind(x[,meas_id], miss_df)
+  miss_df_meas <- cbind(x[, meas_id, drop = FALSE], miss_df)
 
   # Filter to rows missing any values
   out <- miss_df_meas[any_missing,]

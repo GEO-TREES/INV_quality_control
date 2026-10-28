@@ -2,7 +2,8 @@
 #'
 #' @param x `r param_x_stem()`
 #' @param meas_id `r param_id("individual measurements")`
-#' @param census_id `r param_census_id()`
+#' @param census_id `r param_census_id(optional = TRUE)`
+#' @param comment `r param_comment()`
 #'
 #' @return dataframe with values of `meas_id` that are duplicated in `x`
 #' 
@@ -13,10 +14,10 @@
 #'   dbh = c(10, 15, 20, 11, 14)
 #' )
 #' 
-#' flagRecordDup(df, c("tree_id", "census"))
+#' flagRecordDup(df, "tree_id", "census")
 #' 
 #' @export
-flagRecordDup <- function(x, meas_id, census_id = NULL) {
+flagRecordDup <- function(x, meas_id, census_id = NULL, comment = NULL) {
   
   # Check input
   columnCatch(x, meas_id, census_id)

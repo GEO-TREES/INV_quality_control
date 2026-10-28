@@ -1,4 +1,4 @@
-#' Flag and optionally remove ghost recruits with missing values from previous censuses 
+#' Flag ghost recruits with missing values from previous censuses 
 #'
 #' @param x `r param_x_stem()`
 #' @param ind_id `r param_id("individual stems")`
@@ -26,7 +26,7 @@ flagRecruitPre <- function(x, ind_id, census_id, target, comment = NULL) {
   x_sorted <- x[do.call(order, x[c(ind_id, census_id)]), ]
 
   # Identify the first record for each ID
-  is_first_record <- !duplicated(x_sorted[,ind_id])
+  is_first_record <- !duplicated(x_sorted[, ind_id, drop = FALSE])
   
   # Check for NAs in target columns within first records
   # If target is a vector, check if __all__ target columns are NA

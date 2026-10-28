@@ -1,61 +1,94 @@
 #' Plot a stem map for one or more plots
 #'
-#' @param x dataframe containing stem measurements
-#' @param rel_col optional, character vector of length 2 specifying the columns for local 
-#'   relative stem coordinates (e.g., \code{c("x_rel", "y_rel")}).
-#' @param lonlat_col optional, character vector of length 2 specifying the columns for 
-#'   longitude and latitude.
-#' @param proj_col optional, character vector of length 2 specifying the columns with UTM coordinates
-#' @param poly optional `sf` polygon object containing plot boundaries
-#' @param plot_id column name in `x` containing plot IDs in `x` and `poly`
+#' @param x `r param_x_stem()`
+#' @param x_rel column name in `x` with relative X coordinates
+#' @param y_rel column name in `x` with relative Y coordinates
+#' @param plot_id optional, column name in `x` containing plot IDs. If 
+#'     provided, plots are drawn in separate facets
+#' @param diam optional, column name in `x` with stem diameters, used to 
+#'     scale the size of points
+#' @param flag optional, vector of `nrow(x)` used to colour points, e.g. the 
+#'     comment column from a flag function merged onto `x`. `NA` values are 
+#'     drawn in grey and labelled "Not flagged"
+#' @param subs optional dataframe with subplot boundaries, drawn as 
+#'     rectangles. Must contain columns `x_min`, `x_max`, `y_min`, `y_max`, 
+#'     and `plot_id` if plots are drawn in facets
 #'
-#' @return \code{ggplot} object or list of objects one for each plot in `x`
+#' @return ggplot object 
+#' 
+#' @import ggplot2
 #' 
 #' @examples
-#' # simple relative coordinate plot
-#' plot_stem_map(stem_data, rel_col = c("x", "y"), plot_var = "plot_id")
+#' df <- data.frame(
+#'   plot_id = rep(c("A", "B"), each = 50),
+#'   x = runif(100, 0, 100),
+#'   y = runif(100, 0, 100),
+#'   dbh = rlnorm(100, 3, 0.5)
+#' )
+#' 
+#' plotStemMap(df, "x", "y", plot_id = "plot_id", diam = "dbh")
 #' 
 #' @export
-plotStemMap <- function(x, rel_col = NULL, lonlat_col = NULL, proj_col = NULL, 
-  plot_id = NULL, poly = NULL, poly_plot_id = NULL) {
-  
-  # 1. Handle Geospatial Mapping (sf)
-  if (!is.null(lonlat_col) || !is.null(proj_col)) {
-    if (!is.null(lonlat_col)) {
-      stems_sf <- sf::st_as_sf(x, coords = lonlat_col, crs = 4326)
-    } else {
-      stems_sf <- sf::st_as_sf(x, coords = c("X", "Y"), crs = unique(x[[proj_col]])[1])
-    }
-    
-    p <- ggplot2::ggplot() 
-    
-    if (!is.null(poly)) {
-      if (sf::st_crs(poly) != sf::st_crs(stems_sf)) {
-        poly <- sf::st_transform(poly, sf::st_crs(stems_sf))
-      }
-      p <- p + ggplot2::geom_sf(data = poly, fill = NA, color = "black", linewidth = 0.8)
-    }
-    
-    p <- p + ggplot2::geom_sf(data = stems_sf, 
-                              ggplot2::aes(size = if(!is.null(size_var)) .data[[size_var]] else NULL),
-                              alpha = 0.6, color = "forestgreen")
-    
-  } else if (!is.null(rel_col)) {
-    # 2. Handle Local/Relative Cartesian Mapping
-    p <- ggplot2::ggplot(x, ggplot2::aes(x = .data[[rel_col[1]]], 
-                                         y = .data[[rel_col[2]]])) +
-      ggplot2::geom_point(ggplot2::aes(size = if(!is.null(size_var)) .data[[size_var]] else NULL),
-                          alpha = 0.6, color = "forestgreen") +
-      ggplot2::coord_fixed() + 
-      ggplot2::theme_bw() +
-      ggplot2::labs(x = "relative easting (m)", y = "relative northing (m)")
+#' 
+plotStemMap <- function(x, x_rel, y_rel, plot_id = NULL, diam = NULL, 
+  flag = NULL, subs = NULL) {
+
+  # Check input
+  columnCatch(x, x_rel, y_rel, plot_id, diam)
+
+  if (!is.null(flag) && length(flag) != nrow(x)) {
+    stop("'flag' must be the same length as the number of rows in 'x'")
+  }
+
+  # Create dataframe 
+  dat <- data.frame(
+    x = classCatch(x[[x_rel]], "numeric"), 
+    y = classCatch(x[[y_rel]], "numeric"))
+  dat$size <- if (!is.null(diam)) classCatch(x[[diam]], "numeric") else 1
+  dat$flag <- if (!is.null(flag)) as.character(flag) else NA_character_
+  if (!is.null(plot_id)) {
+    dat$plot_id <- x[[plot_id]]
+  }
+
+  # Draw unflagged stems first so flagged stems are on top
+  dat <- dat[order(!is.na(dat$flag)), ]
+  dat$flag[is.na(dat$flag)] <- "Not flagged"
+
+  # Create plot
+  p <- ggplot(dat, aes(x = x, y = y))
+
+  if (!is.null(subs)) {
+    p <- p + geom_rect(data = subs, 
+      aes(xmin = x_min, xmax = x_max, ymin = y_min, ymax = y_max),
+      inherit.aes = FALSE, fill = NA, colour = "grey50", linewidth = 0.3)
+  }
+
+  if (!is.null(flag)) {
+    flag_lev <- setdiff(unique(dat$flag), "Not flagged")
+    flag_col <- c(grDevices::hcl.colors(max(length(flag_lev), 1), "Dark 3")[
+      seq_along(flag_lev)], "grey70")
+    names(flag_col) <- c(flag_lev, "Not flagged")
+    p <- p + 
+      geom_point(aes(size = size, colour = flag), shape = 21, na.rm = TRUE) + 
+      scale_colour_manual(values = flag_col, name = NULL)
   } else {
-    stop("you must provide either 'rel_col' or 'lonlat_col' to map the stems.")
+    p <- p + geom_point(aes(size = size), shape = 21, colour = "grey30", na.rm = TRUE)
   }
 
-  if (!is.null(plot_var) && length(unique(x[[plot_var]])) > 1) {
-    p <- p + ggplot2::facet_wrap(stats::as.formula(paste("~", plot_var)), scales = "free")
+  if (!is.null(diam)) {
+    p <- p + scale_size_area(max_size = 4, name = diam)
+  } else {
+    p <- p + scale_size_identity()
   }
 
+  p <- p + 
+    coord_equal() + 
+    labs(x = x_rel, y = y_rel)
+
+  if (!is.null(plot_id)) {
+    p <- p + facet_wrap(~plot_id)
+  }
+
+  # Return
   return(p)
 }

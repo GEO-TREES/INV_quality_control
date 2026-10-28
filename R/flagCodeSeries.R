@@ -71,7 +71,7 @@ flagCodeSeries <- function(x, ind_id, census_id, target, invalid_trans, comment 
         # If both conditions are met, flag illegal transition
         if (cond1 && cond2) {
           y_un <- y[1,ind_id, drop = FALSE]
-          y_un$code <- paste(y[[target]], collapse = ";")
+          y_un[[target]] <- paste(y[[target]], collapse = ";")
           return(y_un)
         }
       }
@@ -79,6 +79,11 @@ flagCodeSeries <- function(x, ind_id, census_id, target, invalid_trans, comment 
   })
 
   out <- do.call(rbind, res_list)
+
+  # Handle case where no stems are flagged
+  if (is.null(out)) {
+    out <- x[0, c(ind_id, target), drop = FALSE]
+  }
   rownames(out) <- NULL
   
   # Generate comment

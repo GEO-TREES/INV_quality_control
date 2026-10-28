@@ -11,8 +11,10 @@
 #' @param subs_x_max column name in `subs` with maximum X coordinate of subplot
 #' @param subs_y_min column name in `subs` with minimum Y coordinate of subplot
 #' @param subs_y_max column name in `subs` with maximum Y coordinate of subplot
-#' @param correct logical, if TRUE, returns dataframe with corrected coordinates. 
-#'   if FALSE, returns a logical vector of flags.
+#' @param tol distance (m) outside the subplot boundary within which stems 
+#'   are not flagged
+#' @param correct logical, if TRUE, adds columns with coordinates corrected to 
+#'   the centre of the subplot.
 #' @param comment `r param_comment()`
 #' 
 #' @return dataframe of values in `meas_id` with flagged and optionally corrected relative coordinates
@@ -21,7 +23,7 @@
 #' 
 correctLocSub <- function(x, meas_id, subplot_id, x_rel, y_rel, 
   subs, subs_subplot_id, subs_x_min, subs_x_max, subs_y_min, subs_y_max, 
-  correct = FALSE, comment = NULL) {
+  tol = 0, correct = FALSE, comment = NULL) {
 
   # Check input
   columnCatch(x, meas_id, subplot_id, x_rel, y_rel)
@@ -35,24 +37,23 @@ correctLocSub <- function(x, meas_id, subplot_id, x_rel, y_rel,
   subs[[subs_y_max]] <- classCatch(subs[[subs_y_max]], "numeric")
 
   # Merge reference data into a temporary working object
-  x$subplot_id <- paste(x[,subplot_id], sep = "::")
-  subs$subplot_id <- paste(subs[,subs_subplot_id], sep = "::")
+  x$..subplot_key.. <- do.call(paste, c(x[, subplot_id, drop = FALSE], sep = "::"))
+  subs$..subplot_key.. <- do.call(paste, c(subs[, subs_subplot_id, drop = FALSE], sep = "::"))
 
   tmp <- merge(
-    x[, c(meas_id, subplot_id, x_rel, y_rel)], 
-    subs[, c(subs_subplot_id, subs_x_min, subs_x_max, subs_y_min, subs_y_max)], 
-    by.x = "subplot_id", 
-    by.y = "subplot_id", 
+    x[, unique(c(meas_id, subplot_id, x_rel, y_rel, "..subplot_key.."))], 
+    subs[, c("..subplot_key..", subs_x_min, subs_x_max, subs_y_min, subs_y_max)], 
+    by = "..subplot_key..", 
     all.x = TRUE,
     sort = FALSE
   )
 
   # Identify stems outside recorded subplot 
   # Returns TRUE if missing OR outside numeric bounds
-  is_outside <- tmp[[x_rel]] < tmp[[subs_x_min]] | 
-    tmp[[x_rel]] > tmp[[subs_x_max]] | 
-    tmp[[y_rel]] < tmp[[subs_y_min]] | 
-    tmp[[y_rel]] > tmp[[subs_y_max]]
+  is_outside <- tmp[[x_rel]] < tmp[[subs_x_min]] - tol | 
+    tmp[[x_rel]] > tmp[[subs_x_max]] + tol | 
+    tmp[[y_rel]] < tmp[[subs_y_min]] - tol | 
+    tmp[[y_rel]] > tmp[[subs_y_max]] + tol
   is_outside[is.na(is_outside)] <- TRUE
 
   # Optionally correct

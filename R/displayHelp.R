@@ -50,10 +50,11 @@ displayHelp <- function(x, pkg = NULL, html = FALSE) {
   help_file <- utils:::.getHelpFile(h)
   
   if (html) {
-    # Render as HTML
+    # Render as HTML fragment, without a <head> linking to a stylesheet and
+    # KaTeX, which would otherwise be embedded once for every help file
     tc <- textConnection("s", "w", local = TRUE)
-    on.exit(close(tc)) 
-    tools:::Rd2HTML(help_file, out = tc)
+    on.exit(close(tc))
+    tools:::Rd2HTML(help_file, out = tc, standalone = FALSE)
     return(knitr::asis_output(htmltools::htmlPreserve(s)))
   } else {
     # Render as Plain Text

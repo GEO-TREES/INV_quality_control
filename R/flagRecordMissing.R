@@ -4,6 +4,10 @@
 #' @param ind_id `r param_id("individual stems")`
 #' @param census_id `r param_census_id()`
 #' @param census_id_vec `r param_census_id_vec()`
+#' @param plot_id optional, column name(s) in 'x' identifying plots. If 
+#'     provided and `census_id_vec` is `NULL`, the census timeline is guessed 
+#'     separately for each plot, so that plots with different census 
+#'     schedules are not flagged as missing each others' censuses
 #' @param comment `r param_comment()`
 #'
 #' @return dataframe with values of `ind_id` and `census_id` that are missing from `x`
@@ -33,15 +37,23 @@
 #'
 #' @export
 #' 
-flagRecordMissing <- function(x, ind_id, census_id, census_id_vec = NULL, comment = NULL) { 
+flagRecordMissing <- function(x, ind_id, census_id, census_id_vec = NULL, 
+  plot_id = NULL, comment = NULL) { 
 
   # Check input
-  columnCatch(x, ind_id, census_id)
+  columnCatch(x, ind_id, census_id, plot_id)
 
   # If census ID vector not provided, guess from existing data
   if (is.null(census_id_vec)) {
     message("'census_id_vec' not provided, guessing from values in 'census_id'")
-    census_id_vec <- sort(unique(x[[census_id]])) 
+    if (!is.null(plot_id)) {
+      plot_key <- do.call(paste, c(x[, plot_id, drop = FALSE], sep = "::"))
+      census_plot <- lapply(split(x[[census_id]], plot_key), function(y) {
+        sort(unique(y))
+      })
+    } else {
+      census_id_vec <- sort(unique(x[[census_id]])) 
+    }
   } else {
     census_id_vec <- sort(census_id_vec)
   }
@@ -54,6 +66,10 @@ flagRecordMissing <- function(x, ind_id, census_id, census_id_vec = NULL, commen
 
   # Identify missing records
   missing_list <- lapply(x_split_fil, function(y) {
+    if (is.null(census_id_vec)) {
+      census_id_vec <- census_plot[[
+        do.call(paste, c(y[1, plot_id, drop = FALSE], sep = "::"))]]
+    }
     first_c <- min(y[[census_id]])
     last_c  <- max(y[[census_id]])
 
@@ -100,7 +116,7 @@ flagRecordMissing <- function(x, ind_id, census_id, census_id_vec = NULL, commen
 
   # Generate comment
   if (!is.null(comment) && nrow(out) > 0) {
-    out$comment_flagRecordMissing <- comment
+    out$comment <- comment
   }
 
   # Generate message

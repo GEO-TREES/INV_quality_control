@@ -40,8 +40,9 @@ correctSeriesMissing <- function(x, ind_id, census_id, target,
 
   method <- match.arg(method, choices = c("forward", "backward"), several.ok = TRUE)
 
-  # Order dataframe by individuals and then chro,nologically by census
-  out <- x[do.call(order, x[, c(ind_id, census_id)]), ]
+  # Order dataframe by individuals and then chronologically by census
+  x <- x[do.call(order, x[, c(ind_id, census_id)]), ]
+  out <- x
 
   # Optionally add comment column
   if (!is.null(comment)) { 

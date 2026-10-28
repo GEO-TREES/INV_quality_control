@@ -19,7 +19,10 @@
 #'   dbh = c(10, 12, 11, 15)
 #' )
 #' 
-#' flagCodeComb(df, 
+#' df$id <- seq_len(nrow(df))
+#' 
+#' flagCodeVal(df, 
+#'   meas_id = "id",
 #'   target = "code", 
 #'   accepted = c("S", "F"),
 #'   invalid_comb = list(
@@ -68,7 +71,7 @@ flagCodeVal <- function(x, meas_id, target, accepted = NULL, invalid_comb = NULL
   if (!is.null(invalid_comb)) { 
     not_valid_comb <- colSums(do.call(rbind, lapply(invalid_comb, function(y) { 
       res <- Reduce(`&`, lapply(y, grepl, x = x[[target]]))
-    }))) > 0
+    }))) > 0 & in_scope
   } else {
     not_valid_comb <- NULL
   }

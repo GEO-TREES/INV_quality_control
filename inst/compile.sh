@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-quarto render ./PDA_QAQC_nb.qmd
+quarto render ./INV_quality_control_nb.qmd
 
-quarto render PDA_QAQC_nb.qmd --to ipynb
+quarto render ./INV_quality_control_nb.qmd --to ipynb
 

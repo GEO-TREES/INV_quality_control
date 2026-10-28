@@ -84,7 +84,7 @@ correctMortalitySeries <- function(x, ind_id, census_id, diam, status,
         if (is.na(y_rle$values[i]) & 
           all(y_rle$values[c(i-1, i+1)] == 0, na.rm = TRUE) & 
           i != length(y_rle$values)) {
-          # Fill NAs with alive 
+          # Fill NAs with dead 
           y_rle$values[i] <- 0
           mis_method[seq(sum(y_rle$lengths[1:(i-1)])+1, 
             sum(y_rle$lengths[1:i]))] <- "Interpolated dead"
@@ -115,12 +115,12 @@ correctMortalitySeries <- function(x, ind_id, census_id, diam, status,
       if (y_rle$values[2] == 0 & y_rle$lengths[2] >1) {
         # Fill NAs with dead
         y_rle$values[1] <- 0
-        mis_method[1:y_rle$lengths[1]] <- "Proceeded by >1 dead, inferred dead"
+        mis_method[1:y_rle$lengths[1]] <- "Followed by >1 dead, inferred dead"
       # If proceeded by 2 alive
       } else if (y_rle$values[2] == 1 & y_rle$lengths[2] >1) {
         # Fill NAs with alive
         y_rle$values[1] <- 1
-        mis_method[1:y_rle$lengths[1]] <- "Preceded by >1 alive, inferred alive"
+        mis_method[1:y_rle$lengths[1]] <- "Followed by >1 alive, inferred alive"
       }
     }
 
@@ -131,15 +131,15 @@ correctMortalitySeries <- function(x, ind_id, census_id, diam, status,
         y_rle$lengths[length(y_rle$lengths)-1] >1) {
         # Fill NAs with dead
         y_rle$values[length(y_rle$values)] <- 0
-        mis_method[length(mis_method):(y_rle$lengths[length(y_rle$lengths)]+1)] <- 
-          "Preceded by >1 dead, inferred dead"
+        mis_method[(length(mis_method) - y_rle$lengths[length(y_rle$lengths)] + 1):
+          length(mis_method)] <- "Preceded by >1 dead, inferred dead"
       # If preceded by 2 alive
       } else if (y_rle$values[length(y_rle$values)-1] == 1 & 
         y_rle$lengths[length(y_rle$lengths)-1] >1) {
         # Fill NAs with alive
         y_rle$values[length(y_rle$values)] <- 1
-        mis_method[length(mis_method):(y_rle$lengths[length(y_rle$lengths)]+1)] <- 
-          "Proceeded by >1 alive, inferred alive"
+        mis_method[(length(mis_method) - y_rle$lengths[length(y_rle$lengths)] + 1):
+          length(mis_method)] <- "Preceded by >1 alive, inferred alive"
       }
     }
 
@@ -198,7 +198,7 @@ correctMortalitySeries <- function(x, ind_id, census_id, diam, status,
     if (length(alives) > 0) {
       # Convert all within first and last to alive
       interm_change <- intersect(seq(alives[1], alives[length(alives)]),
-        which(x[[status]] == 0))
+        which(y[[status]] == 0))
       if (length(interm_change) > 0) {
         y[interm_change, status] <- 1
         fix_method[interm_change] <- "Inconsistent death converted to alive"
@@ -211,7 +211,7 @@ correctMortalitySeries <- function(x, ind_id, census_id, diam, status,
         if (length(diams) > 0) {
           # Convert all dead with diameters before first alive to alive
           before_change <- intersect(intersect(1:min(alives), 1:min(diams)), 
-            which(x[[status]] == 0))
+            which(y[[status]] == 0))
           if (length(before_change) > 0) {
             y[before_change, status] <- 1
             fix_method[before_change] <- "Death before alive with diameter converted to alive"
@@ -253,6 +253,12 @@ correctMortalitySeries <- function(x, ind_id, census_id, diam, status,
     }
 
   }))
+
+  # Handle case where no corrections are made
+  if (is.null(out)) {
+    out <- x[0, c(ind_id, census_id, status), drop = FALSE]
+    out$method <- character(0)
+  }
   rownames(out) <- NULL
   out[[status]] <- as.logical(out[[status]])
 

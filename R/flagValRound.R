@@ -23,7 +23,7 @@ flagValRound <- function(x, census_id, target, precision = 1, threshold = 0.3, c
   }
 
   # Split by census ID
-  x_split <- split(x, as.list(x[,census_id]), drop = TRUE)
+  x_split <- split(x, as.list(x[, census_id, drop = FALSE]), drop = TRUE)
 
   # For each census
   out <- do.call(rbind, lapply(x_split, function(y) { 
@@ -31,7 +31,7 @@ flagValRound <- function(x, census_id, target, precision = 1, threshold = 0.3, c
 
     # identify which values are multiples of the specified precision
     # using a small tolerance for floating point comparisons
-    is_round <- abs(y[[target]] %% precision) < 1e-10
+    is_round <- abs(y[[target]] / precision - round(y[[target]] / precision)) < 1e-6
   
     # calculate the proportion of rounded values (excluding nas)
     out$prop_round <- mean(is_round, na.rm = TRUE)
